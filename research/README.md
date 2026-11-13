@@ -4,17 +4,41 @@ Everything here is research. Nothing is the extension yet.
 
 | File | What it is |
 |---|---|
-| `lab/index.html` | **Midnight Owl Lab**: original and processed side by side, same frame, every mode. Serve the folder (`cd research/lab && python3 -m http.server`) and open it. |
-| `lab/filters.js` | Copy of `extension/filters.js` (the real filters). |
-| `make_demo.py` | Generates `lab/demo.mp4`, a 41 s test lecture with 11 scenes. |
-| `sheet.js` | Renders `lab/comparison.jpg`: every scene through every mode, in Chromium. |
+| `lab/index.html` | **Midnight Owl Lab**: original and the real extension engine side by side, every mode, plus a "What flips" mask view. Serve the folder (`cd research/lab && python3 -m http.server`) and open it. |
+| `lab/engine.js` | Copy of `extension/engine.js`. |
+| `make_demo.py` | Generates `lab/demo.mp4`, a 41 s synthetic lecture with 11 scenes (`--no-labels` for the website GIFs). |
+| `sheet.js` | Renders `lab/comparison.jpg`: original · classic invert · v1.0 SVG filter · v1.1 engine. |
+| `bench.js` | Performance benchmark: extension off vs. CSS/SVG path vs. WebGL path on any video file. |
 
-> **Round 3 (current):** D became the extension's **Smart** mode, with both flaws fixed:
->
-> - **Grey and unevenly lit boards** now go fully dark. One blur gives each spot a local board brightness, and the picture is divided by it before the flip (Zhang & He style normalisation, done with a premultiplied-alpha trick inside the SVG filter).
-> - **Diagram colour blocks** next to the board flip together with it, so there's no gradient.
->
-> The round 2 tables below are kept for history. C and E were dropped: they flash on fast cuts.
+## Round 4 (current): the WebGL engine (v1.1)
+
+The SVG filter of v1.0 ran ~25 full-screen filter steps per frame, and users saw lag above 2×. v1.1 draws each frame
+with WebGL2 into a canvas laid exactly over the video. Every decision is made on a 240×135 grid; the full-size pass
+reads only the frame and one decision value per pixel. Details are in the header of `extension/engine.js`.
+
+What changed in the picture, tuned on 12 frames of a real 1080p Sam O'Nella video (not committed, it is copyrighted)
+plus the synthetic demo:
+
+- Only **paper** (colourless: a tint under ~0.03, and not dark) and the **lines drawn on it** flip. A line is ink with
+  paper on both sides, horizontally or vertically, at 16 or 32 px.
+- **Solid fills stay**: grey boxes, icons, badges, hair, bars, pies, photos. White glyphs walled in by a solid fill stay white.
+- **Illustrated scenes stay natural.** If under ~50 % of the frame is paper, only large areas of pure white (caption
+  panels, slides) may flip, never light-grey skies, columns, glows, sheep or white faces.
+- **Grey and unevenly lit boards** are divided by their local brightness before flipping, so they go evenly dark.
+- No more auras: the board region is grown one block so flips reach the edges of paper areas; box corners stay clean.
+
+Benchmark (`bench.js`, 1080p VP9 at 2.5×, 1280×720 player, headless Chromium with software rendering, so absolute
+numbers are far slower than on any real GPU; compare rows):
+
+| | page frame rate | note |
+|---|---|---|
+| extension off | 60 fps | |
+| v1.0 CSS/SVG filter | 3 fps | the whole page crawls: the lag users saw |
+| v1.1 WebGL engine | 15 fps | 5× faster in software. Most of the remaining cost is the software copy of each 1080p frame, which a real GPU does on-chip |
+
+In software GL, Smart costs 64 ms vs 34 ms for a plain copy per frame (it was 138 ms before the decisions moved to the grid).
+
+> Rounds 1–3 below are kept for history.
 
 ## Algorithms tested
 

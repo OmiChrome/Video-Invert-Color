@@ -1,10 +1,10 @@
 # Publish Midnight Owl
 
-Everything you need is in two folders:
+Everything you need:
 
-| Folder | What |
+| Where | What |
 |---|---|
-| `release/` | `midnight-owl-edge-1.0.0.zip`, `midnight-owl-firefox-1.0.0.zip` |
+| [Latest release](https://github.com/OmiChrome/Video-Invert-Color/releases/latest) | `midnight-owl-firefox.zip`, `midnight-owl-edge.zip` (and `midnight-owl-chrome.zip` for later) |
 | `store/` | Logo, screenshots, promo tile, and all the text in `LISTING.md` |
 
 ---
@@ -13,7 +13,7 @@ Everything you need is in two folders:
 
 1. Go to **https://addons.mozilla.org/developers/** → **Log in** (make a free Mozilla account).
 2. Click **Submit a New Add-on** → choose **On this site** → **Continue**.
-3. Upload **`release/midnight-owl-firefox-1.0.0.zip`**. Tick **both** boxes: **Firefox** and **Firefox for Android** → **Continue**.
+3. Upload **`midnight-owl-firefox.zip`**. Tick **both** boxes: **Firefox** and **Firefox for Android** → **Continue**.
 4. "Do you need to submit source code?" → **No** → **Continue**.
 5. Fill in from `store/LISTING.md`:
    - Name, Summary, Description
@@ -32,7 +32,7 @@ You'll get an email when it's approved. Your page will be `https://addons.mozill
 
 1. Go to **https://partner.microsoft.com/dashboard/microsoftedge/overview** → sign in with a Microsoft account → register as an **Individual** developer (free).
 2. Click **Create new extension**.
-3. **Packages** → upload **`release/midnight-owl-edge-1.0.0.zip`** → **Continue**.
+3. **Packages** → upload **`midnight-owl-edge.zip`** → **Continue**.
 4. **Availability** → Visibility **Public**, Markets **all** → **Save**.
 5. **Properties**:
    - Category: **Accessibility**
@@ -59,10 +59,10 @@ Send me the two store links and I'll switch the README badges from "coming soon"
 
 ## Updating later
 
-1. Bump `"version"` in `extension/manifest.json` (for example `1.0.1`).
-2. Run `python3 build.py` → new zips in `dist/`.
+1. Bump `"version"` in `extension/manifest.json` (for example `1.1.1`) and add `docs/releases/v1.1.1.md`.
+2. Push a tag `v1.1.1`: GitHub Actions builds the zips and publishes the release.
 3. Firefox: your add-on → **Upload New Version**. Edge: your extension → **Packages** → **Replace** → **Publish**.
 
 ## Chrome (later)
 
-The Chrome Web Store charges a one-time $5 developer fee. When you're ready: https://chrome.google.com/webstore/devconsole → upload `dist/midnight-owl-chrome-*.zip` and use the same text and images.
+The Chrome Web Store charges a one-time $5 developer fee. When you're ready: https://chrome.google.com/webstore/devconsole → upload `midnight-owl-chrome.zip` and use the same text and images.

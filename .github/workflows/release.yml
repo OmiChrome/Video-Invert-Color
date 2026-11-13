@@ -1,4 +1,4 @@
-name: Build and release
+name: Release
 on:
   push:
     tags: ['v*']
@@ -21,19 +21,29 @@ jobs:
           node-version: '22'
       - name: Build zips
         run: python3 build.py
-      - name: Lint Firefox package
+      - name: Lint the Firefox package
         run: npx -y web-ext@10.8.0 lint --source-dir dist/firefox
-      - name: End-to-end tests
-        run: |
-          npm install --no-save playwright@1.63.0
-          npx playwright install --with-deps chromium
-          node test/run.js
       - uses: actions/upload-artifact@v4
         with:
           name: midnight-owl-zips
           path: dist/*.zip
-      - name: Attach to release
+      - name: Publish the GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          name: Midnight Owl ${{ github.ref_name }}
+          body_path: docs/releases/${{ github.ref_name }}.md
           files: dist/*.zip
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: End-to-end tests in Chromium
+        run: |
+          npm install --no-save playwright@1.63.0
+          npx playwright install --with-deps chromium
+          node test/run.js

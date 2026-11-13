@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Midnight Owl</title>
+<meta name="description" content="A browser extension that turns bright whiteboard lectures dark, while faces, photos and colours stay as they are. Press O.">
+<meta property="og:title" content="Midnight Owl">
+<meta property="og:description" content="Watch lectures at midnight. Whiteboards turn dark; faces, photos and colours stay as they are.">
+<meta property="og:image" content="media/hero.gif">
+<link rel="icon" href="media/owl.svg" type="image/svg+xml">
+<style>
+/* One dark room. Centred hero, demo under it, short blocks, install cards. Single dark theme on purpose: it's a night tool. */
+:root {
+  --bg: #0a0a0b; --raise: #131316; --fg: #f4f4f5; --muted: #8e8e93; --faint: #48484a; --line: #ffffff17;
+  --owl: #ffc845; --owl-ink: #1a1405;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
+a { color: inherit; }
+img { max-width: 100%; height: auto; display: block; }
+.wrap { max-width: 1100px; margin: 0 auto; padding-left: max(24px, env(safe-area-inset-left, 0px)); padding-right: max(24px, env(safe-area-inset-right, 0px)); }
+
+nav { position: sticky; top: 0; z-index: 10; background: #0a0a0bcc; backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4); border-bottom: 1px solid var(--line); }
+nav .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 12px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; text-decoration: none; }
+.brand img { width: 28px; height: 28px; }
+nav ul { display: flex; align-items: center; gap: 22px; margin: 0; padding: 0; list-style: none; font-size: 14px; color: var(--muted); }
+nav ul a { text-decoration: none; }
+nav ul a:hover { color: var(--fg); }
+@media (max-width: 640px) { nav ul li:not(:last-child) { display: none; } }
+
+.btn { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 10px 18px; font-weight: 600; font-size: 15px; text-decoration: none; border: 1px solid var(--line); background: var(--raise); }
+.btn.primary { background: var(--owl); color: var(--owl-ink); border-color: var(--owl); }
+.btn.small { padding: 6px 14px; font-size: 13px; }
+.btn:hover { filter: brightness(1.08); }
+.btn:focus-visible, a:focus-visible { outline: 2px solid var(--owl); outline-offset: 3px; }
+
+.hero { text-align: center; padding-block: 72px 36px; display: flex; flex-direction: column; align-items: center; }
+.hero img.owl { width: 84px; height: 84px; }
+h1 { font-size: clamp(36px, 6vw, 62px); line-height: 1.04; letter-spacing: -0.035em; font-weight: 680; margin: 18px 0 0; text-wrap: balance; }
+.tag { color: var(--muted); font-size: clamp(17px, 2.2vw, 20px); max-width: 34ch; margin: 16px 0 0; text-wrap: balance; }
+kbd { font: 600 0.85em var(--mono); border: 1px solid var(--faint); border-bottom-width: 2px; border-radius: 6px; padding: 1px 7px; color: var(--fg); background: var(--raise); }
+.cta { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 28px; }
+.meta { color: var(--faint); font-size: 13px; margin-top: 14px; }
+.soon { color: var(--muted); font-weight: 500; font-size: 12px; }
+
+.demo { margin-top: 8px; }
+.frame { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: #000; max-width: 100%; }
+.labels { display: flex; justify-content: space-between; font: 12px var(--mono); color: var(--muted); padding: 8px 4px 0; letter-spacing: .04em; }
+.labels b { color: var(--owl); font-weight: 600; }
+
+section { padding-block: 72px 8px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); font-weight: 600; margin: 0 0 22px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 18px; }
+.card { min-width: 0; }
+.card h3 { font-size: 17px; margin: 12px 0 2px; letter-spacing: -0.01em; }
+.card p { color: var(--muted); margin: 0; font-size: 15px; }
+
+.how { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 28px 24px; }
+.how h3 { font-size: 17px; margin: 0 0 6px; letter-spacing: -0.01em; }
+.how p { color: var(--muted); margin: 0; font-size: 15px; }
+
+.keys { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); max-width: 640px; }
+.keys li { display: flex; align-items: center; gap: 16px; padding: 13px 0; border-bottom: 1px solid var(--line); }
+.keys .k { min-width: 120px; display: flex; gap: 6px; }
+.keys span:last-child { color: var(--muted); }
+
+.install { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 16px; }
+.box { border: 1px solid var(--line); border-radius: 14px; padding: 20px; background: var(--raise); min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.box h3 { margin: 0; font-size: 17px; }
+.box p, .box ol { color: var(--muted); margin: 0; font-size: 14px; }
+.box ol { padding-left: 18px; }
+.box code { font: 13px var(--mono); color: var(--fg); }
+.box .btn { align-self: flex-start; margin-top: auto; }
+
+footer { margin-top: 88px; border-top: 1px solid var(--line); }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding-block: 24px 40px; color: var(--muted); font-size: 14px; }
+footer .brand { color: var(--fg); }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="media/owl.svg" alt="">Midnight Owl</a>
+    <ul>
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#install">Install</a></li>
+      <li><a href="https://github.com/OmiChrome/Video-Invert-Color">GitHub</a></li>
+      <li><a class="btn primary small" href="https://github.com/OmiChrome/Video-Invert-Color/releases/latest">Download</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main id="top">
+  <div class="wrap hero">
+    <img class="owl" src="media/owl.svg" alt="">
+    <h1>Watch lectures at midnight.</h1>
+    <p class="tag">Press <kbd>O</kbd>. Whiteboards turn dark. Faces, photos and colours stay as they are.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/OmiChrome/Video-Invert-Color/releases/latest">Download v1.1.0</a>
+      <a class="btn" href="#install">Firefox <span class="soon">store soon</span></a>
+      <a class="btn" href="#install">Edge <span class="soon">store soon</span></a>
+    </div>
+    <p class="meta">Free · Chrome, Edge, Firefox, Firefox for Android · No data collected</p>
+  </div>
+
+  <div class="wrap demo">
+    <div class="frame"><img src="media/hero.gif" width="800" height="450" alt="A whiteboard lecture being written: left of the moving line is the original white board, right of it the same frame with Midnight Owl, dark with light writing and the diagram colours unchanged."></div>
+    <div class="labels"><span>Original</span><b>Midnight Owl</b></div>
+  </div>
+
+  <section class="wrap" aria-labelledby="keeps">
+    <h2 id="keeps">What it does</h2>
+    <div class="grid">
+      <div class="card"><div class="frame"><img src="media/whiteboard.gif" width="720" height="203" alt="Whiteboard with coloured writing and a bar chart, before and after." loading="lazy"></div>
+        <h3>Boards and slides go dark</h3><p>Ink turns light and keeps its colour.</p></div>
+      <div class="card"><div class="frame"><img src="media/faces.gif" width="720" height="203" alt="Teacher in front of a whiteboard: the board turns dark, the person looks natural." loading="lazy"></div>
+        <h3>Faces stay human</h3><p>People, photos and drawings are never inverted.</p></div>
+      <div class="card"><div class="frame"><img src="media/fast-cuts.gif" width="720" height="203" alt="Fast cuts between a whiteboard and a dark camera shot at 2.5x speed, without any white flash." loading="lazy"></div>
+        <h3>No flash at 2.5×</h3><p>Every frame is decided on its own, so cuts stay dark.</p></div>
+      <div class="card"><div class="frame"><img src="media/grey-boards.gif" width="720" height="203" alt="An unevenly lit grey whiteboard turning evenly dark." loading="lazy"></div>
+        <h3>Grey and badly lit boards too</h3><p>Uneven lighting is evened out before the flip.</p></div>
+    </div>
+  </section>
+
+  <section class="wrap" id="how" aria-labelledby="how-h">
+    <h2 id="how-h">How it works</h2>
+    <div class="how">
+      <div><h3>Only the paper flips</h3><p>Bright, colourless backgrounds go dark. The lines drawn on them go light.</p></div>
+      <div><h3>Everything else stays</h3><p>Boxes, icons, colour fills, faces and photos keep their look, with highlights softened.</p></div>
+      <div><h3>On the GPU, every frame</h3><p>A tiny analysis grid plus one pass at screen size. No lag, even at 2.5×.</p></div>
+      <div><h3>Nothing leaves your browser</h3><p>No account, no tracking, no network requests. Settings stay on your device.</p></div>
+    </div>
+  </section>
+
+  <section class="wrap" aria-labelledby="controls">
+    <h2 id="controls">Controls</h2>
+    <ul class="keys">
+      <li><span class="k"><kbd>O</kbd></span><span>On or off, on any page with a video</span></li>
+      <li><span class="k"><kbd>Alt</kbd><kbd>O</kbd></span><span>Same, from anywhere in the browser</span></li>
+      <li><span class="k"><img src="media/owl.png" width="22" height="22" alt="Toolbar owl"></span><span>Bright when it's working, grey when it isn't</span></li>
+      <li><span class="k"><kbd>Popup</kbd></span><span>Smart · Invert · Dim, brightness, warm tint</span></li>
+    </ul>
+  </section>
+
+  <section class="wrap" id="install" aria-labelledby="install-h">
+    <h2 id="install-h">Install</h2>
+    <div class="install">
+      <div class="box">
+        <h3>Firefox <span class="soon">desktop and Android</span></h3>
+        <p>Add-ons store listing coming soon. Until then:</p>
+        <ol><li>Download <code>midnight-owl-firefox.zip</code></li><li>Open <code>about:debugging</code> → This Firefox</li><li>Load Temporary Add-on → pick the zip</li></ol>
+        <a class="btn small" href="https://github.com/OmiChrome/Video-Invert-Color/releases/latest/download/midnight-owl-firefox.zip">Firefox zip</a>
+      </div>
+      <div class="box">
+        <h3>Edge</h3>
+        <p>Add-ons store listing coming soon. Until then:</p>
+        <ol><li>Download and unzip <code>midnight-owl-edge.zip</code></li><li>Open <code>edge://extensions</code>, turn on Developer mode</li><li>Load unpacked → pick the folder</li></ol>
+        <a class="btn small" href="https://github.com/OmiChrome/Video-Invert-Color/releases/latest/download/midnight-owl-edge.zip">Edge zip</a>
+      </div>
+      <div class="box">
+        <h3>Chrome, Brave, Opera</h3>
+        <p>Same as Edge:</p>
+        <ol><li>Download and unzip <code>midnight-owl-chrome.zip</code></li><li>Open <code>chrome://extensions</code>, turn on Developer mode</li><li>Load unpacked → pick the folder</li></ol>
+        <a class="btn small" href="https://github.com/OmiChrome/Video-Invert-Color/releases/latest/download/midnight-owl-chrome.zip">Chrome zip</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="media/owl.svg" alt="">Midnight Owl</a>
+    <span><a href="https://github.com/OmiChrome/Video-Invert-Color">GitHub</a> · MIT licence · Made by Omi</span>
+  </div>
+</footer>
+</body>
+</html>

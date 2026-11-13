@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Build store packages from ./extension.
 
-  python3 build.py   ->  dist/midnight-owl-edge-<v>.zip     (Microsoft Edge Add-ons)
-                        dist/midnight-owl-firefox-<v>.zip  (Firefox Add-ons)
-                        dist/midnight-owl-chrome-<v>.zip   (Chrome Web Store, for later)
+  python3 build.py   ->  dist/midnight-owl-edge.zip     (Microsoft Edge Add-ons)
+                        dist/midnight-owl-firefox.zip  (Firefox Add-ons, desktop and Android)
+                        dist/midnight-owl-chrome.zip   (Chrome Web Store, or "Load unpacked" in any Chromium browser)
+
+The names have no version on purpose, so https://github.com/OmiChrome/Video-Invert-Color/releases/latest/download/<name>
+always points at the newest release. The version lives in extension/manifest.json.
 """
 import json, shutil, zipfile
 from pathlib import Path
@@ -23,7 +26,7 @@ def build(target):
     shutil.rmtree(out, ignore_errors=True)
     shutil.copytree(SRC, out, ignore=shutil.ignore_patterns(".*", "manifest.json"))
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    zpath = DIST / f"midnight-owl-{target}-{manifest['version']}.zip"
+    zpath = DIST / f"midnight-owl-{target}.zip"
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
         for f in sorted(out.rglob("*")):
             if f.is_file():

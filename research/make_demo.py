@@ -107,7 +107,7 @@ SEGMENTS = [  # (label, seconds, frame-fn(local_t))
     ("11 teacher in front of board", 4, teacher),
 ]
 
-def main(out):
+def main(out, labels=True):
     p = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
                           "-c:v", "libx264", "-preset", "slow", "-crf", "26", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out], stdin=subprocess.PIPE)
     start = 0.0; marks = []
@@ -115,11 +115,13 @@ def main(out):
         marks.append((round(start, 2), label))
         for i in range(int(dur * FPS)):
             t = i / FPS; im = fn(t)
-            ImageDraw.Draw(im).text((8, H - 22), label, fill=(255, 0, 255), font=font(14))
+            if labels:
+                ImageDraw.Draw(im).text((8, H - 22), label, fill=(255, 0, 255), font=font(14))
             p.stdin.write(im.tobytes())
         start += dur
     p.stdin.close(); p.wait()
     print("segments:", marks)
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else str(HERE / "demo.mp4"))
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    main(args[0] if args else str(Path(__file__).parent / "lab" / "demo.mp4"), labels="--no-labels" not in sys.argv)
