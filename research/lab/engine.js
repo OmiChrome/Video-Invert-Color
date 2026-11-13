@@ -116,7 +116,7 @@ void main() {
   float wc = min(solid(vUv + d1), solid(vUv - d1)), we = min(solid(vUv + d2), solid(vUv - d2));
   float walled = max(max(max(min(wa, wb), min(wa, wc)), max(min(wa, we), min(wb, wc))), max(min(wb, we), min(wc, we)));
   // R board · G paper brightness · B flip lines here · A flip paper here
-  o = vec4(B.r, B.g, smoothstep(0.3, 0.6, texture(uIn, vUv).r), 1.0 - smoothstep(0.55, 0.85, walled));
+  o = vec4(B.r, B.g, smoothstep(0.2, 0.45, texture(uIn, vUv).r), 1.0 - smoothstep(0.55, 0.85, walled));
 }`;
 
 // Pass 6 (screen size): the picture.
