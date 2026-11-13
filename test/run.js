@@ -79,6 +79,13 @@ const seek = (page, t) => page.evaluate(async t => {
   await page.waitForTimeout(700);
   check('video shown again: canvas back on the picture', (await pathOf(page)) === 'webgl');
   await page.evaluate(() => document.querySelector('video').pause());
+  await seek(page, 2.5);
+  await page.evaluate(() => { const v = document.querySelector('video'); v.width = 800; v.height = 450; });
+  await page.waitForTimeout(600);
+  const paused = await luma(page);
+  check('resized while paused: picture redrawn, not black', paused > 0.04 && paused < 0.15, `mean luma ${paused.toFixed(2)}`);
+  await page.evaluate(() => { const v = document.querySelector('video'); v.width = 960; v.height = 540; });
+  await page.waitForTimeout(400);
 
   await page.locator('#box').click(); await page.keyboard.type('hello owl');
   check('typing o in a text box does not toggle', (await pathOf(page)) === 'webgl' && (await page.inputValue('#box')) === 'hello owl');

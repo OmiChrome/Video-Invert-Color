@@ -471,13 +471,15 @@ class OwlVideo {
     const key = [left, top, cw, ch, cs.zIndex, cs.opacity, rect].join();
     const dpr = devicePixelRatio || 1;
     const pw = Math.max(1, Math.round(Math.min(cw * dpr, vw * rect[2]))), ph = Math.max(1, Math.round(Math.min(ch * dpr, vh * rect[3])));
-    if (c.width !== pw || c.height !== ph) { c.width = pw; c.height = ph; }
+    const resized = c.width !== pw || c.height !== ph;
+    if (resized) { c.width = pw; c.height = ph; }   // resizing clears the canvas: redraw below (matters when paused)
     if (key !== this.box) {
       this.box = key;
       Object.assign(c.style, { left: left + 'px', top: top + 'px', width: cw + 'px', height: ch + 'px', zIndex: cs.zIndex === 'auto' ? '' : cs.zIndex, opacity: cs.opacity, borderRadius: cs.borderRadius });
       this.rect = rect;
       this.hudPlace();
     }
+    if (resized && this.shown) this.draw();
   }
 
   loop() {
