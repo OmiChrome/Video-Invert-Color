@@ -41,7 +41,7 @@ async function run(ctx, sw, label, settings) {
   const log = await sw.evaluate(async () => (await chrome.storage.session.get('owlLog')).owlLog ?? []);
   const perf = log.filter(e => e.kind === 'perf');
   if (perf.length) result.rendererCpuMs = +(perf.reduce((a, e) => a + e.cpuMs, 0) / perf.length).toFixed(2);
-  await sw.evaluate(() => chrome.runtime.sendMessage({ owlClearLog: true }).catch(() => {}));
+  await sw.evaluate(() => { log = []; return chrome.storage.session.set({ owlLog: [] }); });   // a worker can't message itself
   await page.close();
   console.log(label.padEnd(26), JSON.stringify(result));
   return result;

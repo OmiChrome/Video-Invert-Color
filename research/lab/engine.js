@@ -31,6 +31,8 @@ uniform vec2 uCell;      // one stats cell in uv
 out vec4 o;
 const vec3 W = vec3(0.2126, 0.7152, 0.0722);
 vec3 src(vec2 uv) { return texture(uSrc, uSrcRect.xy + vec2(uv.x, 1.0 - uv.y) * uSrcRect.zw).rgb; }
+// full-resolution pixels for the analysis, whatever the player size (mipmaps only smooth the picture pass)
+vec3 src0(vec2 uv) { return textureLod(uSrc, uSrcRect.xy + vec2(uv.x, 1.0 - uv.y) * uSrcRect.zw, 0.0).rgb; }
 float chroma(vec3 c) { return max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b)); }
 // Paper = colourless and not dark. Real paper (digital whiteboards, slides, flat grey backgrounds) has almost no tint;
 // skies, walls and white animals in drawings carry a 0.04+ tint, so they are not treated as paper.
@@ -42,7 +44,7 @@ const OWL_STATS_FS = OWL_COMMON + `
 void main() {
   float P = 0.0, PY = 0.0, WHITE = 0.0, COL = 0.0;
   for (int j = 0; j < 4; j++) for (int i = 0; i < 4; i++) {
-    vec3 c = src(vUv + (vec2(float(i), float(j)) - 1.5) * 0.25 * uCell);
+    vec3 c = src0(vUv + (vec2(float(i), float(j)) - 1.5) * 0.25 * uCell);
     float y = dot(c, W), p = paperness(c, y);
     P += p; PY += p * y; WHITE += neutral(c) * smoothstep(0.88, 0.95, y); COL += smoothstep(0.1, 0.25, chroma(c));
   }
@@ -160,23 +162,22 @@ void main() {
   o = vec4(outc * uTint, 1.0);
 }`;
 
-function owlShader(gl, type, text) {
-  const s = gl.createShader(type);
-  gl.shaderSource(s, text);
-  gl.compileShader(s);
-  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS) && !gl.isContextLost()) throw new Error('shader: ' + gl.getShaderInfoLog(s));
-  return s;
-}
-
-function owlProgram(gl, fs, names) {
-  const p = gl.createProgram();
-  gl.attachShader(p, owlShader(gl, gl.VERTEX_SHADER, OWL_VS));
-  gl.attachShader(p, owlShader(gl, gl.FRAGMENT_SHADER, fs));
-  gl.linkProgram(p);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS) && !gl.isContextLost()) throw new Error('link: ' + gl.getProgramInfoLog(p));
-  const u = {};
-  for (const n of names) u[n] = gl.getUniformLocation(p, n);
-  return { p, u };
+// Compile every shader first and only then ask for the results, so the driver can work on them in parallel;
+// the vertex shader is shared by all programs.
+function owlPrograms(gl, defs) {
+  const compile = (type, text) => { const sh = gl.createShader(type); gl.shaderSource(sh, text); gl.compileShader(sh); return sh; };
+  const vs = compile(gl.VERTEX_SHADER, OWL_VS);
+  const made = defs.map(([fs]) => {
+    const f = compile(gl.FRAGMENT_SHADER, fs), p = gl.createProgram();
+    gl.attachShader(p, vs); gl.attachShader(p, f); gl.linkProgram(p);
+    return { p, f };
+  });
+  return made.map(({ p, f }, i) => {
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS) && !gl.isContextLost()) throw new Error('shader: ' + (gl.getShaderInfoLog(f) || gl.getProgramInfoLog(p)));
+    const u = {};
+    for (const n of defs[i][1]) u[n] = gl.getUniformLocation(p, n);
+    return { p, u };
+  });
 }
 
 // The GPU part. Usable with any image source: <video>, <img>, <canvas>, ImageBitmap.
@@ -187,11 +188,13 @@ class OwlGL {
     const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, preserveDrawingBuffer: false });
     if (!gl) throw Object.assign(new Error('WebGL2 is not available'), { name: 'NoWebGL2' });
     this.gl = gl;
-    this.stats = owlProgram(gl, OWL_STATS_FS, ['uSrc', 'uSrcRect', 'uCell']);
-    this.board = owlProgram(gl, OWL_BOARD_FS, ['uStats', 'uCell']);
-    this.morph = owlProgram(gl, OWL_MORPH_FS, ['uIn', 'uCell', 'uGrow', 'uChan']);
-    this.decide = owlProgram(gl, OWL_DECIDE_FS, ['uStats', 'uBoard', 'uIn', 'uCell']);
-    this.main = owlProgram(gl, OWL_MAIN_FS, ['uSrc', 'uSrcRect', 'uDecide', 'uMode', 'uCap', 'uTint']);
+    [this.stats, this.board, this.morph, this.decide, this.main] = owlPrograms(gl, [
+      [OWL_STATS_FS, ['uSrc', 'uSrcRect', 'uCell']],
+      [OWL_BOARD_FS, ['uStats', 'uCell']],
+      [OWL_MORPH_FS, ['uIn', 'uCell', 'uGrow', 'uChan']],
+      [OWL_DECIDE_FS, ['uStats', 'uBoard', 'uIn', 'uCell']],
+      [OWL_MAIN_FS, ['uSrc', 'uSrcRect', 'uDecide', 'uMode', 'uCap', 'uTint']],
+    ]);
     this.vao = gl.createVertexArray();
     this.statsFbo = gl.createFramebuffer();
     this.boardFbo = gl.createFramebuffer();
@@ -338,17 +341,19 @@ class OwlGL {
 // Falls back to the CSS/SVG filter (class "owl-css") when WebGL can't be used for this video.
 
 const OWL_MAX_GL = 6;
+const OWL_EVENTS = ['loadstart', 'loadeddata', 'seeked', 'resize', 'emptied', 'ratechange', 'play', 'pause', 'encrypted', 'waitingforkey'];
 let owlGlCount = 0, owlNoGl = false;
 
 class OwlVideo {
   constructor(video, settings, hooks) {
     this.v = video; this.s = { ...settings }; this.hooks = hooks;
     this.path = 'none'; this.reason = ''; this.lock = '';
-    this.canvas = null; this.engine = null; this.hud = null;
+    this.canvas = null; this.engine = null; this.hud = null; this.glEvents = null; this.filterBefore = null;
     this.rect = [0, 0, 1, 1]; this.box = ''; this.shown = false; this.handle = 0; this.raf = 0;
     this.perf = { frames: 0, cpu: 0, cpuMax: 0, skipped: 0, lastPresented: -1, since: performance.now(), q: video.getVideoPlaybackQuality?.() };
     this.onEvent = e => this.event(e);
-    for (const t of ['loadstart', 'loadeddata', 'seeked', 'resize', 'emptied', 'ratechange', 'play', 'pause']) video.addEventListener(t, this.onEvent);
+    for (const t of OWL_EVENTS) video.addEventListener(t, this.onEvent);
+    video.textTracks?.addEventListener?.('change', this.onEvent);
     document.addEventListener('fullscreenchange', this.onEvent);
     addEventListener('resize', this.onEvent);
     this.choose();
@@ -360,12 +365,18 @@ class OwlVideo {
     return { path: this.path, video: `${v.videoWidth}x${v.videoHeight}`, shown: this.canvas ? `${this.canvas.width}x${this.canvas.height}` : '', rate: v.playbackRate, src: (v.currentSrc || '').split(':')[0] };
   }
 
+  // Why this video can't use the WebGL overlay right now ('' = it can).
   cssReason() {
-    if (this.s.engine === 'css') return 'forced';   // hidden setting, used for benchmarks and as an escape hatch
+    const v = this.v;
+    if (this.s.engine === 'css') return 'forced';                            // hidden setting, for benchmarks and as an escape hatch
     if (owlNoGl) return 'webgl2-unavailable';
-    if (this.lock) return this.lock;
-    if (this.v.mediaKeys) return 'protected-video';
-    if (document.fullscreenElement === this.v) return 'native-fullscreen';
+    if (this.lock) return this.lock;                                         // cross-origin, render error (until a new source)
+    if (this.engine?.gl.isContextLost()) return 'context-lost';
+    if (v.mediaKeys) return 'protected-video';                               // DRM frames can't be read
+    if (document.fullscreenElement === v) return 'native-fullscreen';        // the overlay can't follow into native fullscreen
+    if (v.controls) return 'native-controls';                                // the overlay would hide the browser's own controls
+    if ([...(v.textTracks || [])].some(t => t.mode === 'showing')) return 'captions-showing';   // ...and its captions
+    if (getComputedStyle(v).transform !== 'none') return 'transformed-video';
     if (!this.engine && owlGlCount >= OWL_MAX_GL) return 'too-many-videos';
     return '';
   }
@@ -385,22 +396,24 @@ class OwlVideo {
         this.engine = new OwlGL(c);
       } catch (e) {
         if (e.name === 'NoWebGL2') owlNoGl = true;
-        this.canvas = null;
+        this.canvas = this.engine = null;
         this.log('error', { what: 'webgl-init', message: String(e.message || e) }, true);
         return this.toCss(owlNoGl ? 'webgl2-unavailable' : 'webgl-init-failed');
       }
       owlGlCount++;
-      c.addEventListener('webglcontextlost', e => { e.preventDefault(); this.log('context-lost', {}, true); this.toCss('context-lost'); });
-      c.addEventListener('webglcontextrestored', () => { this.disposeGl(); this.log('context-restored', {}, true); this.choose(); });
+      // Listeners die with this canvas (dispose() itself fires a "lost" event later, which must be ignored).
+      const ac = this.glEvents = new AbortController();
+      c.addEventListener('webglcontextlost', e => { e.preventDefault(); this.log('context-lost', {}, true); this.toCss('context-lost'); }, { signal: ac.signal });
+      c.addEventListener('webglcontextrestored', () => { this.log('context-restored', {}, true); this.disposeGl(); this.choose(); }, { signal: ac.signal });
       this.v.after(c);
       this.ro = new ResizeObserver(() => this.place());
       this.ro.observe(this.v);
       if (this.v.parentElement) this.ro.observe(this.v.parentElement);
       this.mo = new MutationObserver(() => this.place());
-      this.mo.observe(this.v, { attributes: true, attributeFilter: ['style', 'class'] });
+      this.mo.observe(this.v, { attributes: true, attributeFilter: ['style', 'class', 'controls'] });
     }
     this.engine.set(this.s);
-    this.v.classList.remove('owl-css');
+    this.cssOff();
     if (this.path !== 'webgl') { this.path = 'webgl'; this.reason = ''; this.log('attach', {}); }
     this.place();
     this.loop();
@@ -409,11 +422,32 @@ class OwlVideo {
 
   toCss(reason) {
     this.stopLoop();
-    if (this.canvas) this.canvas.style.display = 'none';
+    // Free the WebGL context unless we expect to come straight back (leaving native fullscreen).
+    if (reason === 'native-fullscreen') { if (this.canvas) this.canvas.style.display = 'none'; } else this.disposeGl();
     this.shown = false;
-    this.v.classList.add('owl-css');
+    this.cssOn();
     if (this.path !== 'css' || this.reason !== reason) { this.path = 'css'; this.reason = reason; this.log('fallback', { reason }, true); }
+    // After a GPU reset, try WebGL again a little later (a few times at most).
+    if (reason === 'context-lost' && (this.retries = (this.retries || 0) + 1) <= 3)
+      setTimeout(() => { if (this.path === 'css' && this.reason === 'context-lost') this.choose(); }, 3000);
     this.hudUpdate(true);
+  }
+
+  // The CSS/SVG fallback is an inline style on the video, so it also works inside shadow DOM and under strict CSP.
+  cssOn() {
+    const st = this.v.style;
+    if (!this.filterBefore) this.filterBefore = [st.getPropertyValue('filter'), st.getPropertyPriority('filter')];
+    const mode = this.s.mode === 'mask' ? 'smart' : this.s.mode;
+    st.setProperty('filter', owlFilterCss(mode, this.s.warm), 'important');
+    this.v.classList.add('owl-css');
+  }
+  cssOff() {
+    if (this.filterBefore) {
+      const [val, prio] = this.filterBefore;
+      if (val) this.v.style.setProperty('filter', val, prio); else this.v.style.removeProperty('filter');
+      this.filterBefore = null;
+    }
+    this.v.classList.remove('owl-css');
   }
 
   update(settings) {
@@ -428,7 +462,7 @@ class OwlVideo {
   event(e) {
     switch (e.type) {
       case 'loadstart': this.lock = ''; this.choose(); break;            // new source: try WebGL again
-      case 'fullscreenchange': this.choose(); break;
+      case 'fullscreenchange': case 'encrypted': case 'waitingforkey': case 'change': this.choose(); break;
       case 'resize': this.box = ''; this.place(); this.draw(); break;  // intrinsic size changed
       case 'emptied': if (this.canvas) this.canvas.style.display = 'none'; this.shown = false; break;
       case 'ratechange': this.log('rate', {}); break;
@@ -436,12 +470,15 @@ class OwlVideo {
     }
   }
 
-  // Lay the canvas exactly over the visible picture (handles object-fit, borders, transformed parents).
+  // Lay the canvas exactly over the visible picture. Works for any containing block, page zoom and scaled
+  // parents (all distances are converted with the measured scale), clips to scrolling/overflow parents the canvas
+  // would otherwise escape, and follows position:fixed videos.
   place() {
     const v = this.v, c = this.canvas;
     if (!v.isConnected) return this.hooks.gone(this);
     if (!c || this.path !== 'webgl') return;
     const cs = getComputedStyle(v);
+    if (cs.transform !== 'none' || v.controls) return this.choose();
     const w = v.clientWidth, h = v.clientHeight, vw = v.videoWidth, vh = v.videoHeight;
     if (!w || !h || !vw || !vh || cs.display === 'none' || cs.visibility === 'hidden') {   // hidden: no canvas until it shows again
       c.style.display = 'none'; this.shown = false; this.box = ''; return;
@@ -449,33 +486,43 @@ class OwlVideo {
     let x = 0, y = 0, cw = w, ch = h, rect = [0, 0, 1, 1];
     const ar = vw / vh, box = w / h;
     if (cs.objectFit === 'cover') {
-      if (box > ar) { const s = ar / box; rect = [0, (1 - s) / 2, 1, s]; } else { const s = box / ar; rect = [(1 - s) / 2, 0, s, 1]; }
+      if (box > ar) { const k = ar / box; rect = [0, (1 - k) / 2, 1, k]; } else { const k = box / ar; rect = [(1 - k) / 2, 0, k, 1]; }
     } else if (cs.objectFit !== 'fill') {
       if (box > ar) { cw = h * ar; x = (w - cw) / 2; } else { ch = w / ar; y = (h - ch) / 2; }
     }
-    const fixed = cs.position === 'fixed';
-    c.style.position = fixed ? 'fixed' : 'absolute';
-    const vr = v.getBoundingClientRect();
-    let ox = 0, oy = 0;
-    if (!fixed) {   // where would left:0/top:0 put us? (works for any containing block)
-      const cr = c.getBoundingClientRect();
-      ox = cr.left - (parseFloat(c.style.left) || 0); oy = cr.top - (parseFloat(c.style.top) || 0);
-      if (c.style.display === 'none') {   // hidden canvases have no box: measure once while invisible
-        c.style.visibility = 'hidden'; c.style.display = 'block';
-        const r2 = c.getBoundingClientRect();
-        ox = r2.left - (parseFloat(c.style.left) || 0); oy = r2.top - (parseFloat(c.style.top) || 0);
-        c.style.display = 'none'; c.style.visibility = '';
-      }
+    // measure (a display:none canvas has no box, so show it invisibly for a moment)
+    const wasHidden = c.style.display === 'none';
+    if (wasHidden) { c.style.visibility = 'hidden'; c.style.display = 'block'; }
+    c.style.position = cs.position === 'fixed' ? 'fixed' : 'absolute';
+    c.style.width = cw + 'px'; c.style.height = ch + 'px';
+    const cr = c.getBoundingClientRect(), vr = v.getBoundingClientRect();
+    const sx = cr.width / (c.offsetWidth || 1) || 1, sy = cr.height / (c.offsetHeight || 1) || 1;   // screen px per canvas CSS px
+    const vsx = vr.width / (v.offsetWidth || 1) || 1, vsy = vr.height / (v.offsetHeight || 1) || 1;
+    const tx = vr.left + (v.clientLeft + x) * vsx, ty = vr.top + (v.clientTop + y) * vsy;          // target, in screen px
+    const left = (parseFloat(c.style.left) || 0) + (tx - cr.left) / sx, top = (parseFloat(c.style.top) || 0) + (ty - cr.top) / sy;
+    // clip by overflow/scroll parents between the video and the canvas's containing block
+    let l = -Infinity, t = -Infinity, r = Infinity, b = Infinity;
+    const cb = c.offsetParent;
+    for (let el = v.parentElement; el && el !== cb && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+      const es = getComputedStyle(el);
+      if (es.overflowX === 'visible' && es.overflowY === 'visible') continue;
+      const er = el.getBoundingClientRect();
+      l = Math.max(l, er.left); t = Math.max(t, er.top); r = Math.min(r, er.right); b = Math.min(b, er.bottom);
     }
-    const left = vr.left - ox + v.clientLeft + x, top = vr.top - oy + v.clientTop + y;
-    const key = [left, top, cw, ch, cs.zIndex, cs.opacity, rect].join();
+    const tw = cw * vsx, th = ch * vsy;
+    const ins = [Math.max(0, t - ty) / sy, Math.max(0, tx + tw - r) / sx, Math.max(0, ty + th - b) / sy, Math.max(0, l - tx) / sx];
+    const clip = ins.some(n => n > 0.5) ? `inset(${ins.map(n => n.toFixed(1) + 'px').join(' ')})` : '';
+    if (wasHidden) { c.style.display = 'none'; c.style.visibility = ''; }
+
+    const key = [left, top, cw, ch, clip, cs.zIndex, cs.opacity, rect].join();
     const dpr = devicePixelRatio || 1;
-    const pw = Math.max(1, Math.round(Math.min(cw * dpr, vw * rect[2]))), ph = Math.max(1, Math.round(Math.min(ch * dpr, vh * rect[3])));
+    // canvas resolution = its size on screen in device pixels (zoom and scaled parents included), at most the video's
+    const pw = Math.max(1, Math.round(Math.min(cw * sx * dpr, vw * rect[2]))), ph = Math.max(1, Math.round(Math.min(ch * sy * dpr, vh * rect[3])));
     const resized = c.width !== pw || c.height !== ph;
     if (resized) { c.width = pw; c.height = ph; }   // resizing clears the canvas: redraw below (matters when paused)
     if (key !== this.box) {
       this.box = key;
-      Object.assign(c.style, { left: left + 'px', top: top + 'px', width: cw + 'px', height: ch + 'px', zIndex: cs.zIndex === 'auto' ? '' : cs.zIndex, opacity: cs.opacity, borderRadius: cs.borderRadius });
+      Object.assign(c.style, { left: left + 'px', top: top + 'px', clipPath: clip, zIndex: cs.zIndex === 'auto' ? '' : cs.zIndex, opacity: cs.opacity, borderRadius: cs.borderRadius });
       this.rect = rect;
       this.hudPlace();
     }
@@ -558,7 +605,7 @@ class OwlVideo {
   }
 
   hudUpdate(force) {
-    if (!this.s.debug) return this.hudRemove();
+    if (!this.s.debug || this.path === 'none') return this.hudRemove();
     if (!this.hud) {
       const d = this.hud = document.createElement('div');
       d.className = 'owl-hud';
@@ -584,6 +631,7 @@ class OwlVideo {
 
   disposeGl() {
     this.stopLoop();
+    this.glEvents?.abort(); this.glEvents = null;   // first: dispose() fires a late "lost" event we must not hear
     this.ro?.disconnect(); this.mo?.disconnect();
     this.ro = this.mo = null;
     if (this.engine) { this.engine.dispose(); this.engine = null; owlGlCount--; }
@@ -591,12 +639,13 @@ class OwlVideo {
   }
 
   stop() {
+    this.path = 'none';
     this.disposeGl();
     this.hudRemove();
-    this.v.classList.remove('owl-css');
-    for (const t of ['loadstart', 'loadeddata', 'seeked', 'resize', 'emptied', 'ratechange', 'play', 'pause']) this.v.removeEventListener(t, this.onEvent);
+    this.cssOff();
+    for (const t of OWL_EVENTS) this.v.removeEventListener(t, this.onEvent);
+    this.v.textTracks?.removeEventListener?.('change', this.onEvent);
     document.removeEventListener('fullscreenchange', this.onEvent);
     removeEventListener('resize', this.onEvent);
-    this.path = 'none';
   }
 }

@@ -19,7 +19,7 @@ On Android (Firefox): open the menu → Extensions → Midnight Owl, and flip th
 
 Three modes: Smart (default), Invert and Dim. Also a warm tint for less blue light and a text brightness slider.
 
-Fast: every frame is processed on your GPU (WebGL), so there is no lag even at 2.5× speed. About 70 KB, no tracking, no data collected.
+Fast: every frame is processed on your GPU (WebGL), so there is no lag even at 2.5× speed. About 80 KB, no tracking, no data collected.
 
 Free and open source (MIT): https://github.com/OmiChrome/Video-Invert-Color
 

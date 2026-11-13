@@ -15,7 +15,7 @@ Press <kbd>O</kbd>. Whiteboards turn dark. Faces, photos and colours stay as the
 ![Android](https://img.shields.io/badge/Android-Firefox-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![WebGL2](https://img.shields.io/badge/engine-WebGL2-555?style=flat-square)
 ![Manifest V3](https://img.shields.io/badge/Manifest-V3-555?style=flat-square)
-![Size](https://img.shields.io/badge/size-~70_KB-555?style=flat-square)
+![Size](https://img.shields.io/badge/size-~80_KB-555?style=flat-square)
 ![No tracking](https://img.shields.io/badge/data_collected-none-2ea44f?style=flat-square)
 ![License: MIT](https://img.shields.io/badge/license-MIT-555?style=flat-square)
 

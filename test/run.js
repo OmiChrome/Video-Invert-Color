@@ -144,10 +144,60 @@ const seek = (page, t) => page.evaluate(async t => {
   const p5 = await ctx.newPage(); await p5.goto('http://localhost:8770/xvideo.html');
   await p5.waitForFunction(() => document.querySelector('video').readyState >= 2); await p5.waitForTimeout(1200);
   check('cross-origin video without CORS falls back to the CSS filter', (await pathOf(p5)) === 'css', await pathOf(p5));
+  check('...and frees its WebGL context (no canvas left)', await p5.evaluate(() => !document.querySelector('.owl-canvas')));
 
-  await page.bringToFront(); await page.mouse.click(1100, 800);
-  await page.keyboard.press('o'); await page.waitForTimeout(600);
+  // --- fixes from the code review ---
+  const alignedIn = (pg, getVideo) => pg.evaluate(getVideo => {
+    const v = eval(getVideo), c = v.nextElementSibling, a = v.getBoundingClientRect(), b = c.getBoundingClientRect();
+    return { d: Math.max(Math.abs(a.left - b.left), Math.abs(a.top - b.top), Math.abs(a.width - b.width), Math.abs(a.height - b.height)), clip: c.style.clipPath, shown: getComputedStyle(c).display !== 'none' };
+  }, getVideo);
+
+  const p7 = await ctx.newPage(); await p7.goto('http://localhost:8770/controls.html');
+  await p7.waitForFunction(() => document.querySelector('video').readyState >= 2); await p7.waitForTimeout(600);
+  check('native <video controls>: CSS path, so the browser controls stay visible', (await pathOf(p7)) === 'css');
+
+  const p8 = await ctx.newPage(); await p8.goto('http://localhost:8770/scroller.html');
+  await p8.waitForFunction(() => document.querySelector('video').readyState >= 2); await p8.waitForTimeout(700);
+  await p8.evaluate(() => document.getElementById('sc').scrollTop = 200); await p8.waitForTimeout(400);
+  const sc = await alignedIn(p8, "document.querySelector('video')");
+  check('video in a scrolling box: overlay follows the scroll and is clipped to the box', sc.d <= 1 && sc.clip.startsWith('inset'), JSON.stringify(sc));
+
+  const p9 = await ctx.newPage(); await p9.goto('http://localhost:8770/zoom.html');
+  await p9.waitForFunction(() => document.querySelector('video').readyState >= 2); await p9.waitForTimeout(700);
+  await p9.evaluate(() => dispatchEvent(new Event('resize'))); await p9.waitForTimeout(300);
+  const zm = await alignedIn(p9, "document.querySelector('video')");
+  check('video under a scaled parent: overlay lines up', zm.d <= 1, JSON.stringify(zm));
+
+  const p10 = await ctx.newPage(); await p10.goto('http://localhost:8770/shadow.html'); await p10.waitForTimeout(1500);
+  const sh = await p10.evaluate(() => { const c = document.querySelector('my-player').shadowRoot.querySelector('.owl-canvas'); return !!c && getComputedStyle(c).display !== 'none'; });
+  check('video inside shadow DOM is darkened too', sh);
+  for (const pg of [p7, p8, p9, p10]) await pg.close();
+
+  await page.bringToFront(); await seek(page, 2.5);
+  await page.evaluate(() => dispatchEvent(new KeyboardEvent('keydown', { key: 'o', code: 'KeyO', bubbles: true })));
+  await page.waitForTimeout(400);
+  check('a page script faking the O key does nothing', (await pathOf(page)) === 'webgl');
+
+  const lost = await page.evaluate(() => { const gl = document.querySelector('.owl-canvas').getContext('webgl2'); const x = gl && gl.getExtension('WEBGL_lose_context'); if (!x) return false; x.loseContext(); return true; });
+  await page.waitForTimeout(500);
+  const lostLuma = await luma(page);
+  check('GPU context lost: falls back to the CSS filter, no white box', lost && (await pathOf(page)) === 'css' && lostLuma < 0.25, `lost=${lost} path=${await pathOf(page)} luma=${lostLuma.toFixed(2)}`);
+  await page.waitForTimeout(3600);
+  check('...and goes back to WebGL a moment later', (await pathOf(page)) === 'webgl');
+
+  const p11 = await ctx.newPage(); await p11.goto('http://localhost:8770/stale.html'); await p11.waitForTimeout(800);
+  check('leftovers from an old copy of the extension are cleaned up', await p11.evaluate(() =>
+    !document.querySelector('.owl-hud') && document.querySelectorAll('.owl-canvas').length <= 1 && document.querySelector('.owl-canvas')?.textContent !== 'old' && !document.querySelector('video').style.filter.includes('invert(1)')));
+  await p11.close();
+
+  await set({ debug: true }); await page.bringToFront(); await page.waitForTimeout(2600);
+  await sw.evaluate(() => { log = []; return chrome.storage.session.set({ owlLog: [] }); }); await page.waitForTimeout(400);
+  await page.mouse.click(1100, 800);
+  await page.keyboard.press('o'); await page.waitForTimeout(2200);
   check('O turns it off again', (await pathOf(page)) === 'off');
+  const offLog = await sw.evaluate(async () => (await chrome.storage.session.get('owlLog')).owlLog ?? []);
+  check('turning off leaves no stats box and logs no false errors', await page.evaluate(() => !document.querySelector('.owl-hud')) && !offLog.some(e => e.kind === 'context-lost' || e.kind === 'error'), JSON.stringify(offLog.filter(e => ['context-lost','fallback','error'].includes(e.kind))));
+  await set({ debug: false });
   check('off everywhere (other tab, iframe, fallback)', (await pathOf(p3)) === 'off' && (await pathOf(frame)) === 'off' && (await pathOf(p5)) === 'off');
   check('owl dim when off', !(await iconOn(page)));
 

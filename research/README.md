@@ -38,6 +38,16 @@ numbers are far slower than on any real GPU; compare rows):
 
 In software GL, Smart costs 64 ms vs 34 ms for a plain copy per frame (it was 138 ms before the decisions moved to the grid).
 
+Robustness fixes from an independent code review (all covered by `test/run.js`, 46 checks):
+
+- GPU context loss falls back to the CSS filter and retries WebGL; it can never leave a white box.
+- Videos with the browser's own controls or captions, transformed videos and DRM videos use the CSS filter, so nothing is hidden or black.
+- The overlay follows scrolling, is clipped by overflow containers, and lines up under page zoom and scaled parents.
+- After an extension update or reload, the old content script switches itself off and its leftovers are removed.
+- O only reacts to real key presses, by the letter on the key (Dvorak, Colemak), never while typing; videos inside shadow DOM are found too.
+- Known limits: a speech bubble or caption panel in an illustrated scene can flip only partly at its edges, and
+  a light sky right under such a panel can get a faint dark smudge.
+
 > Rounds 1–3 below are kept for history.
 
 ## Algorithms tested
