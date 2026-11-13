@@ -11,7 +11,7 @@ Midnight Owl makes lecture videos comfortable to watch at night, in a dark room.
 
 • Whiteboards, grey slides and unevenly lit boards turn dark, and the writing turns light.
 • Ink and diagram colours keep their hue: red stays red, blue stays blue.
-• Faces, photos and camera shots are only dimmed, never inverted, so the teacher still looks human.
+• Faces, photos, icons, boxes and illustrated scenes keep their look, so the teacher still looks human.
 • Blackboards and dark slides stay dark, so you never get a white flash, even at 2.5× speed.
 
 How to use: press O on any page with a video (Alt+O works too). The owl icon lights up while it is working and turns grey when it is not.
@@ -19,7 +19,7 @@ On Android (Firefox): open the menu → Extensions → Midnight Owl, and flip th
 
 Three modes: Smart (default), Invert and Dim. Also a warm tint for less blue light and a text brightness slider.
 
-Lightweight: about 40 KB, no tracking, no data collected, and no JavaScript runs while the video plays. The effect is a GPU filter.
+Fast: every frame is processed on your GPU (WebGL), so there is no lag even at 2.5× speed. About 70 KB, no tracking, no data collected.
 
 Free and open source (MIT): https://github.com/OmiChrome/Video-Invert-Color
 
