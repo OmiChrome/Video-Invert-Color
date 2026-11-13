@@ -1,4 +1,4 @@
-// Night Owl content script. Adds one <style> rule and one hidden <svg> while on; nothing runs per frame.
+// Midnight Owl content script. Adds one <style> rule and one hidden <svg> while on; nothing runs per frame.
 'use strict';
 const owlApi = globalThis.browser ?? globalThis.chrome;
 const OWL_DEFAULTS = { on: false, mode: 'smart', warm: false, cap: 0.8 };

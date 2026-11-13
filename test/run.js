@@ -94,7 +94,7 @@ const seek = (page, t) => page.evaluate(async t => { const v = document.querySel
   await pop.goto(`chrome-extension://${extId}/popup.html`); await pop.waitForTimeout(300);
   await pop.click('label:has([value=dim])'); await pop.waitForTimeout(200);
   check('popup saves mode', (await sw.evaluate(() => chrome.storage.local.get('mode'))).mode === 'dim');
-  await pop.click('#on'); await pop.waitForTimeout(200);
+  await pop.click('label:has([value=smart])'); await pop.click('#on'); await pop.waitForTimeout(300);
   await pop.screenshot({ path: path.resolve(__dirname, '../assets/popup.png') });
   check('popup switch turns it on', (await sw.evaluate(() => chrome.storage.local.get('on'))).on === true);
 

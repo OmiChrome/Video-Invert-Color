@@ -1,12 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "Night Owl: Dark Lectures",
-  "short_name": "Night Owl",
+  "name": "Midnight Owl: Dark Mode for Lectures",
+  "short_name": "Midnight Owl",
   "version": "1.0.0",
   "description": "Watch whiteboard lectures in a dark room. Turns bright boards dark, keeps faces, photos and colours natural. Press O.",
   "icons": { "16": "icons/on-16.png", "32": "icons/on-32.png", "48": "icons/on-48.png", "128": "icons/on-128.png" },
   "action": {
-    "default_title": "Night Owl (O or Alt+O)",
+    "default_title": "Midnight Owl (O or Alt+O)",
     "default_popup": "popup.html",
     "default_icon": { "16": "icons/off-16.png", "32": "icons/off-32.png", "48": "icons/off-48.png", "128": "icons/off-128.png" }
   },
@@ -20,6 +20,6 @@
     "run_at": "document_idle"
   }],
   "commands": {
-    "toggle": { "suggested_key": { "default": "Alt+O" }, "description": "Turn Night Owl on or off" }
+    "toggle": { "suggested_key": { "default": "Alt+O" }, "description": "Turn Midnight Owl on or off" }
   }
 }

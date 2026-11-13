@@ -1,4 +1,4 @@
-// Night Owl filters. Shared by the extension and the research lab.
+// Midnight Owl filters. Shared by the extension and the research lab.
 // Everything here is plain SVG filter markup: the browser runs it on the GPU for every video frame,
 // so no JavaScript runs while the video plays.
 'use strict';

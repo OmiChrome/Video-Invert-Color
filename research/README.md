@@ -4,7 +4,7 @@ Everything here is research. Nothing is the extension yet.
 
 | File | What it is |
 |---|---|
-| `lab/index.html` | **Night Owl Lab**: original and processed side by side, same frame, every mode. Serve the folder (`cd research/lab && python3 -m http.server`) and open it. |
+| `lab/index.html` | **Midnight Owl Lab**: original and processed side by side, same frame, every mode. Serve the folder (`cd research/lab && python3 -m http.server`) and open it. |
 | `lab/filters.js` | Copy of `extension/filters.js` (the real filters). |
 | `make_demo.py` | Generates `lab/demo.mp4`, a 41 s test lecture with 11 scenes. |
 | `sheet.js` | Renders `lab/comparison.jpg`: every scene through every mode, in Chromium. |

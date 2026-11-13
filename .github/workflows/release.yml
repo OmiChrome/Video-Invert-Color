@@ -30,7 +30,7 @@ jobs:
           node test/run.js
       - uses: actions/upload-artifact@v4
         with:
-          name: night-owl-zips
+          name: midnight-owl-zips
           path: dist/*.zip
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/v')
