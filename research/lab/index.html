@@ -1,0 +1,400 @@
+<meta charset="utf-8">
+<title>Night Lecture Lab</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a dark viewing room. Big processed video on the left, controls and the algorithm list on the right; stacks on phones.
+   Single dark theme on purpose: this page is meant to be opened in a dark room. */
+:root {
+  --bg: #0d0f12; --panel: #15181d; --line: #262b33; --fg: #d9dde3; --muted: #8b93a0;
+  --accent: #e0a458; --good: #6fbf8e; --bad: #d9796b;
+  --sans: "IBM Plex Sans", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.5; }
+.wrap { max-width: 1280px; margin: 0 auto; padding-block: 20px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 20px; }
+h1 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: .01em; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+header p { margin: 4px 0 0; color: var(--muted); max-width: 70ch; }
+kbd { font-family: var(--mono); font-size: 12px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--fg); }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
+@media (max-width: 900px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.stage { display: grid; gap: 10px; min-width: 0; }
+video { width: 100%; height: auto; display: block; background: #000; border-radius: 6px; }
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.compare[hidden] { display: none; }
+.cap { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button, .seg { font: inherit; font-size: 13px; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 4px 10px; cursor: pointer; }
+button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.algos { display: grid; gap: 8px; }
+.algo { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); cursor: pointer; }
+.algo:has(input:checked) { border-color: var(--accent); }
+.algo input { margin-top: 4px; accent-color: var(--accent); }
+.algo b { font-weight: 600; }
+.algo .tag { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-left: 6px; }
+.algo p { grid-column: 2; margin: 0; color: var(--muted); font-size: 13px; }
+.opts { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; }
+.opts label { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+input[type=range] { flex: 1; accent-color: var(--accent); }
+.stats { font-family: var(--mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.results { overflow-x: auto; }
+table { border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { border-bottom: 1px solid var(--line); padding: 6px 10px; text-align: right; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 500; }
+.ok { color: var(--good); } .no { color: var(--bad); }
+.note { color: var(--muted); font-size: 13px; max-width: 75ch; }
+svg.defs { position: absolute; width: 0; height: 0; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<!-- All filters live here as plain SVG markup. Every algorithm except "Classic invert" is one of these. -->
+<svg class="defs" aria-hidden="true">
+  <defs>
+    <!-- B: hue-safe luma invert. One matrix; values filled in by setCap(). -->
+    <filter id="f-hue" color-interpolation-filters="sRGB" x="0" y="0" width="1" height="1">
+      <feColorMatrix id="m-hue" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/>
+    </filter>
+
+    <!-- C: adaptive. Same single matrix, but JS re-tunes it per scene. -->
+    <filter id="f-adapt" color-interpolation-filters="sRGB" x="0" y="0" width="1" height="1">
+      <feColorMatrix id="m-adapt" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/>
+    </filter>
+
+    <!-- F: dim only (reference). -->
+    <filter id="f-dim" color-interpolation-filters="sRGB" x="0" y="0" width="1" height="1">
+      <feComponentTransfer>
+        <feFuncR type="gamma" amplitude="0.55" exponent="1.3"/>
+        <feFuncG type="gamma" amplitude="0.55" exponent="1.3"/>
+        <feFuncB type="gamma" amplitude="0.55" exponent="1.3"/>
+      </feComponentTransfer>
+    </filter>
+
+    <!-- D: Smart board, pure SVG. Invert only regions that are mostly bright, colourless "paper";
+         everything else (faces, photos, dark boards) is only dimmed. Works per frame, no JS. -->
+    <filter id="f-board" color-interpolation-filters="sRGB" x="0" y="0" width="1" height="1" primitiveUnits="objectBoundingBox">
+      <!-- 1. luma + chroma: R=Y, G=0.5+1.5(B-Y), B=0.5+1.5(R-Y) -->
+      <feColorMatrix in="SourceGraphic" result="ycc" type="matrix" values="
+         0.2126 0.7152 0.0722 0 0
+        -0.3189 -1.0728 1.3917 0 0.5
+         1.1811 -1.0728 -0.1083 0 0.5
+         0 0 0 1 0"/>
+      <!-- 2. bright? (R)  neutral? (G,B) -->
+      <feComponentTransfer in="ycc" result="paperParts">
+        <feFuncR type="table" tableValues="0 0 0 0 0 0 0.15 0.55 0.9 1 1"/>
+        <feFuncG type="table" tableValues="0 0 0 0 0 0 0 0 0.25 0.85 1 0.85 0.25 0 0 0 0 0 0 0 0"/>
+        <feFuncB type="table" tableValues="0 0 0 0 0 0 0 0 0.25 0.85 1 0.85 0.25 0 0 0 0 0 0 0 0"/>
+      </feComponentTransfer>
+      <!-- 3. paper = bright AND neutral  (R+G+B-2, clamped), grey image -->
+      <feColorMatrix in="paperParts" result="paper" type="matrix" values="
+        1 1 1 0 -2  1 1 1 0 -2  1 1 1 0 -2  0 0 0 0 1"/>
+      <!-- 4. local paper fraction. Blur in premultiplied space keeps edges normalised. -->
+      <feGaussianBlur in="paper" result="frac" stdDeviation="0.035 0.06"/>
+      <!-- 5. board core: >=~55% of the neighbourhood is paper -->
+      <feComponentTransfer in="frac" result="core">
+        <feFuncR type="table" tableValues="0 0 0 0 0.1 0.45 0.85 1 1 1 1"/>
+        <feFuncG type="table" tableValues="0 0 0 0 0.1 0.45 0.85 1 1 1 1"/>
+        <feFuncB type="table" tableValues="0 0 0 0 0.1 0.45 0.85 1 1 1 1"/>
+        <feFuncA type="linear" slope="0" intercept="1"/>
+      </feComponentTransfer>
+      <!-- 6. a band around the core where only paper pixels flip (keeps faces next to the board natural) -->
+      <feGaussianBlur in="core" result="coreWide" stdDeviation="0.03 0.05"/>
+      <feComponentTransfer in="coreWide" result="near">
+        <feFuncR type="table" tableValues="0 0.6 1 1 1 1 1 1 1 1 1"/>
+        <feFuncG type="table" tableValues="0 0.6 1 1 1 1 1 1 1 1 1"/>
+        <feFuncB type="table" tableValues="0 0.6 1 1 1 1 1 1 1 1 1"/>
+        <feFuncA type="linear" slope="0" intercept="1"/>
+      </feComponentTransfer>
+      <feComposite in="near" in2="paper" operator="arithmetic" k1="1" k2="0" k3="0" k4="0" result="nearPaper"/>
+      <!-- 7. mask m = core + nearPaper (clamped) moved into alpha -->
+      <feComposite in="core" in2="nearPaper" operator="arithmetic" k1="0" k2="1" k3="1" k4="0" result="msum"/>
+      <feColorMatrix in="msum" result="mask" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1 0 0 0 0"/>
+      <!-- 8. the two looks -->
+      <feColorMatrix in="SourceGraphic" id="m-board-inv" result="inv" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/>
+      <feComponentTransfer in="SourceGraphic" result="dim">
+        <feFuncR type="gamma" amplitude="0.6" exponent="1.25"/>
+        <feFuncG type="gamma" amplitude="0.6" exponent="1.25"/>
+        <feFuncB type="gamma" amplitude="0.6" exponent="1.25"/>
+      </feComponentTransfer>
+      <!-- 9. out = m*inv + (1-m)*dim -->
+      <feComposite in="inv" in2="mask" operator="in" result="invM"/>
+      <feComposite in="dim" in2="mask" operator="out" result="dimM"/>
+      <feComposite in="invM" in2="dimM" operator="arithmetic" k1="0" k2="1" k3="1" k4="0"/>
+    </filter>
+
+    <!-- E: Smart board + JS grid. Same as D, but the board "core" comes from a 32x18 map the sampler draws,
+         which adds a whole-frame gate (no flipping of a white cup or shirt in a camera shot) and stability. -->
+    <filter id="f-grid" color-interpolation-filters="sRGB" x="0" y="0" width="1" height="1" primitiveUnits="objectBoundingBox">
+      <feColorMatrix in="SourceGraphic" result="ycc" type="matrix" values="
+         0.2126 0.7152 0.0722 0 0
+        -0.3189 -1.0728 1.3917 0 0.5
+         1.1811 -1.0728 -0.1083 0 0.5
+         0 0 0 1 0"/>
+      <feComponentTransfer in="ycc" result="paperParts">
+        <feFuncR type="table" tableValues="0 0 0 0 0 0 0.15 0.55 0.9 1 1"/>
+        <feFuncG type="table" tableValues="0 0 0 0 0 0 0 0 0.25 0.85 1 0.85 0.25 0 0 0 0 0 0 0 0"/>
+        <feFuncB type="table" tableValues="0 0 0 0 0 0 0 0 0.25 0.85 1 0.85 0.25 0 0 0 0 0 0 0 0"/>
+      </feComponentTransfer>
+      <feColorMatrix in="paperParts" result="paper" type="matrix" values="
+        1 1 1 0 -2  1 1 1 0 -2  1 1 1 0 -2  0 0 0 0 1"/>
+      <feImage id="grid-img" result="grid" x="0" y="0" width="1" height="1" preserveAspectRatio="none" href="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"/>
+      <!-- grid R = core, G = near band -->
+      <feColorMatrix in="grid" result="nearG" type="matrix" values="0 1 0 0 0  0 1 0 0 0  0 1 0 0 0  0 0 0 0 1"/>
+      <feComposite in="nearG" in2="paper" operator="arithmetic" k1="1" k2="0" k3="0" k4="0" result="nearPaper"/>
+      <feColorMatrix in="grid" result="coreR" type="matrix" values="1 0 0 0 0  1 0 0 0 0  1 0 0 0 0  0 0 0 0 1"/>
+      <feComposite in="coreR" in2="nearPaper" operator="arithmetic" k1="0" k2="1" k3="1" k4="0" result="msum"/>
+      <feColorMatrix in="msum" result="mask" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1 0 0 0 0"/>
+      <feColorMatrix in="SourceGraphic" id="m-grid-inv" result="inv" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/>
+      <feComponentTransfer in="SourceGraphic" result="dim">
+        <feFuncR type="gamma" amplitude="0.6" exponent="1.25"/>
+        <feFuncG type="gamma" amplitude="0.6" exponent="1.25"/>
+        <feFuncB type="gamma" amplitude="0.6" exponent="1.25"/>
+      </feComponentTransfer>
+      <feComposite in="inv" in2="mask" operator="in" result="invM"/>
+      <feComposite in="dim" in2="mask" operator="out" result="dimM"/>
+      <feComposite in="invM" in2="dimM" operator="arithmetic" k1="0" k2="1" k3="1" k4="0"/>
+    </filter>
+
+    <!-- Warm / low-blue tint, chainable after any algorithm. -->
+    <filter id="f-warm" color-interpolation-filters="sRGB" x="0" y="0" width="1" height="1">
+      <feColorMatrix type="matrix" values="1 0 0 0 0  0 0.82 0 0 0  0 0 0.55 0 0  0 0 0 1 0"/>
+    </filter>
+  </defs>
+</svg>
+
+<div class="wrap">
+  <header>
+    <h1>Night Lecture Lab</h1>
+    <p>Six ways to make a whiteboard lecture watchable in a dark room, running live on a test video. Pick one on the right, try <kbd>O</kbd> or <kbd>Alt</kbd>+<kbd>O</kbd> to toggle, and switch to 2.5× to check the scene cuts.</p>
+  </header>
+
+  <div class="main">
+    <section class="stage" aria-label="Video">
+      <video id="v" src="demo.mp4" muted loop playsinline autoplay crossorigin="anonymous"></video>
+      <div class="bar">
+        <button id="play" type="button">Pause</button>
+        <span class="cap">Speed</span>
+        <button type="button" data-rate="1">1×</button>
+        <button type="button" data-rate="1.5">1.5×</button>
+        <button type="button" data-rate="2.5" aria-pressed="true">2.5×</button>
+        <button id="cmp" type="button" aria-pressed="false">Show original side by side</button>
+      </div>
+      <div class="compare" id="compare" hidden>
+        <div><video id="orig" src="demo.mp4" muted playsinline></video><div class="cap">original</div></div>
+        <div class="cap" style="align-self:center">The original copy follows the main video. Use it to judge what each algorithm keeps and what it changes.</div>
+      </div>
+      <div>
+        <h2>Jump to a scene</h2>
+        <div class="bar" id="scenes"></div>
+      </div>
+      <div class="stats" id="stats">sampler idle</div>
+    </section>
+
+    <aside class="algos" aria-label="Algorithm">
+      <h2>Algorithm</h2>
+      <label class="algo"><input type="radio" name="algo" value="classic"><span><b>A · Classic invert</b><span class="tag">CSS only</span></span>
+        <p>What Video Enhancer does. Flips everything: red ink turns cyan, faces look alien, dark scenes turn white.</p></label>
+      <label class="algo"><input type="radio" name="algo" value="hue"><span><b>B · Hue-safe invert</b><span class="tag">1 SVG matrix · 0 JS</span></span>
+        <p>Flips only brightness and keeps colour hue, so red stays red. Capped so text is never full white. Still flips faces and dark scenes.</p></label>
+      <label class="algo"><input type="radio" name="algo" value="adapt"><span><b>C · Adaptive hue-safe</b><span class="tag">1 matrix · tiny JS</span></span>
+        <p>Like B, but looks at the frame and only inverts when the background is bright. Dark scenes are just dimmed. Faces still flip when inverted.</p></label>
+      <label class="algo"><input type="radio" name="algo" value="board" checked><span><b>D · Smart board</b><span class="tag">SVG only · 0 JS</span></span>
+        <p>Inverts only areas that are mostly bright, colourless paper. Faces, photos and dark boards are only dimmed. Reacts on the same frame.</p></label>
+      <label class="algo"><input type="radio" name="algo" value="grid"><span><b>E · Smart board + scene check</b><span class="tag">SVG + small JS</span></span>
+        <p>Like D, but a 32×18 map decides where the board is, and it skips frames that are mostly camera or photo, so a white cup or shirt doesn't flip.</p></label>
+      <label class="algo"><input type="radio" name="algo" value="dim"><span><b>F · Dim only</b><span class="tag">SVG only · 0 JS</span></span>
+        <p>Reference. Nothing is inverted; everything is darkened. The whiteboard stays a grey glow.</p></label>
+      <label class="algo"><input type="radio" name="algo" value="off"><span><b>Off</b></span>
+        <p>Original video.</p></label>
+
+      <div class="opts">
+        <label><input type="checkbox" id="warm"> Warm tint (less blue light)</label>
+        <label>Text brightness <input type="range" id="cap" min="0.45" max="0.95" step="0.05" value="0.8"> <span class="stats" id="capv">80%</span></label>
+      </div>
+    </aside>
+  </div>
+
+  <section>
+    <h2>Measured in Chromium</h2>
+    <p class="note">Brightness of the processed picture for each scene, from screenshots of this page in headless Chromium. Average and 95th-percentile luminance, 0 is black and 1 is white. The last column is the brightest moment while the video cuts between a whiteboard and a dark camera shot every 0.4 s, played at 2.5×. Anything above about 0.3 is a flash in a dark room. Cells read average / 95th percentile; green is comfortable, red is too bright.</p>
+    <img src="comparison.jpg" alt="Grid of screenshots: each scene of the test video processed by each algorithm" style="width:100%;border-radius:6px;margin-top:12px">
+    <div class="results" id="results"><p class="note">Results load with the page.</p></div>
+  </section>
+</div>
+
+<script>
+// ---- shared maths -------------------------------------------------------
+const WR = 0.2126, WG = 0.7152, WB = 0.0722, YT = 0.06;
+let YCAP = 0.8;
+// Y' = a + b·Y with hue kept: c' = s·c + (a + (b - s)·Y)
+function lumaMatrix(a, b, s = 1) {
+  const k = b - s, r = n => n.toFixed(4);
+  return [
+    [s + k * WR, k * WG, k * WB, 0, a],
+    [k * WR, s + k * WG, k * WB, 0, a],
+    [k * WR, k * WG, s + k * WB, 0, a],
+    [0, 0, 0, 1, 0]].map(row => row.map(r).join(' ')).join('  ');
+}
+const invertMatrix = () => lumaMatrix(YCAP, -(YCAP - YT));
+function setCap(v) {
+  YCAP = v;
+  for (const id of ['m-hue', 'm-board-inv', 'm-grid-inv']) document.getElementById(id).setAttribute('values', invertMatrix());
+  document.getElementById('capv').textContent = Math.round(v * 100) + '%';
+}
+setCap(0.8);
+
+// ---- page wiring ----------------------------------------------------------
+const v = document.getElementById('v'), orig = document.getElementById('orig');
+const stats = document.getElementById('stats');
+let algo = 'board', enabled = true;
+
+function apply() {
+  const warm = document.getElementById('warm').checked && enabled && algo !== 'off';
+  const base = !enabled || algo === 'off' ? '' : algo === 'classic' ? 'invert(1)' : `url(#f-${algo})`;
+  v.style.filter = [base, warm ? 'url(#f-warm)' : ''].filter(Boolean).join(' ') || 'none';
+  sampler.sync();
+}
+document.querySelectorAll('input[name=algo]').forEach(r => r.addEventListener('change', () => { algo = r.value; apply(); }));
+document.getElementById('warm').addEventListener('change', apply);
+document.getElementById('cap').addEventListener('input', e => setCap(+e.target.value));
+
+document.querySelectorAll('[data-rate]').forEach(b => b.addEventListener('click', () => {
+  v.playbackRate = orig.playbackRate = +b.dataset.rate;
+  document.querySelectorAll('[data-rate]').forEach(x => x.setAttribute('aria-pressed', x === b));
+}));
+v.playbackRate = 2.5;
+const playBtn = document.getElementById('play');
+playBtn.addEventListener('click', () => v.paused ? v.play() : v.pause());
+v.addEventListener('play', () => { playBtn.textContent = 'Pause'; if (!document.getElementById('compare').hidden) orig.play(); });
+v.addEventListener('pause', () => { playBtn.textContent = 'Play'; orig.pause(); });
+document.getElementById('cmp').addEventListener('click', e => {
+  const c = document.getElementById('compare'); c.hidden = !c.hidden;
+  e.target.setAttribute('aria-pressed', !c.hidden);
+  if (!c.hidden) { orig.currentTime = v.currentTime; orig.playbackRate = v.playbackRate; if (!v.paused) orig.play(); }
+});
+setInterval(() => { if (!document.getElementById('compare').hidden && Math.abs(orig.currentTime - v.currentTime) > 0.15) orig.currentTime = v.currentTime; }, 500);
+
+const SCENES = [[0, 'Whiteboard + diagram'], [5, 'Blackboard'], [9, 'Slide + face inset'], [13, 'Face full frame'], [17, 'Dark slide'], [20, 'Grey slide'], [23, 'Rapid cuts'], [27, 'Fade in'], [31, 'Photo']];
+const sc = document.getElementById('scenes');
+for (const [t, name] of SCENES) {
+  const b = document.createElement('button'); b.type = 'button'; b.textContent = name;
+  b.addEventListener('click', () => { v.currentTime = t + 0.5; orig.currentTime = v.currentTime; });
+  sc.append(b);
+}
+
+// O or Alt+O toggles, never while typing.
+addEventListener('keydown', e => {
+  if (e.code !== 'KeyO' || e.ctrlKey || e.metaKey || e.shiftKey || e.repeat) return;
+  const t = e.target; if (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) && t.type !== 'radio' && t.type !== 'checkbox' && t.type !== 'range') return;
+  e.preventDefault(); e.stopImmediatePropagation(); enabled = !enabled; apply();
+}, true);
+
+// ---- sampler (only for C and E) ------------------------------------------
+// Runs on video frames, at most every 160 ms of *video* time: at 2.5× that is every 64 ms of wall time.
+const sampler = (() => {
+  const SW = 64, SH = 36, GW = 32, GH = 18;
+  const cv = new OffscreenCanvas(SW, SH), cx = cv.getContext('2d', { willReadFrequently: true });
+  const gridCv = document.createElement('canvas'); gridCv.width = GW; gridCv.height = GH;
+  const gx = gridCv.getContext('2d'), gridImg = gx.createImageData(GW, GH);
+  let running = false, lastT = -1, invertOn = false, cur = { a: 0, b: 0.8, s: 0.8 }, cost = 0, n = 0, lastWall = 0, hz = 0;
+  const mAdapt = document.getElementById('m-adapt'), feImg = document.getElementById('grid-img');
+
+  function frame(now, meta) {
+    if (!running) return;
+    v.requestVideoFrameCallback(frame);
+    const t = meta.mediaTime;
+    if (Math.abs(t - lastT) < 0.16) return;
+    lastT = t;
+    const t0 = performance.now();
+    cx.drawImage(v, 0, 0, SW, SH);
+    const d = cx.getImageData(0, 0, SW, SH).data;
+    if (algo === 'adapt') adapt(d); else grid(d);
+    cost = cost * 0.9 + (performance.now() - t0) * 0.1;
+    hz = hz * 0.9 + (1000 / Math.max(1, now - lastWall)) * 0.1; lastWall = now;
+    if (++n % 10 === 0) stats.textContent = `sampler: ${cost.toFixed(2)} ms per sample · ${hz.toFixed(0)} samples/s · ${algo === 'adapt' ? (invertOn ? 'inverting' : 'dimming') : 'board map updated'}`;
+  }
+
+  // C: one decision for the whole frame
+  function adapt(d) {
+    const ys = new Float32Array(d.length / 4);
+    for (let i = 0, j = 0; i < d.length; i += 4, j++) ys[j] = (WR * d[i] + WG * d[i + 1] + WB * d[i + 2]) / 255;
+    const sorted = ys.slice().sort(), yb = sorted[sorted.length >> 1];
+    if (!invertOn && yb > 0.55) invertOn = true; else if (invertOn && yb < 0.4) invertOn = false;
+    let a, b, s;
+    if (invertOn) { b = -(YCAP - YT) / Math.max(yb, 0.5); a = YT - b * yb; s = 1; }
+    else { a = 0; b = s = 0.8; }
+    // bright-area guard: if >15% of the output would still be brighter than 0.5, scale it down
+    let bright = 0; for (const y of ys) if (a + b * y > 0.5) bright++;
+    if (bright / ys.length > 0.15) { const g = 0.6; a *= g; b *= g; s *= g; }
+    // darker targets apply at once; brighter ones ease in
+    const k = (a + b * yb) < (cur.a + cur.b * yb) || Math.sign(b) !== Math.sign(cur.b) ? 1 : 0.35;
+    cur = { a: cur.a + (a - cur.a) * k, b: cur.b + (b - cur.b) * k, s: cur.s + (s - cur.s) * k };
+    mAdapt.setAttribute('values', lumaMatrix(cur.a, cur.b, cur.s));
+  }
+
+  // E: 32×18 board map. Cell = 2×2 sample pixels.
+  let gridState = new Float32Array(GW * GH);
+  function grid(d) {
+    const paper = new Float32Array(GW * GH);
+    for (let y = 0; y < SH; y++) for (let x = 0; x < SW; x++) {
+      const i = (y * SW + x) * 4, R = d[i] / 255, G = d[i + 1] / 255, B = d[i + 2] / 255;
+      const Y = WR * R + WG * G + WB * B, chroma = Math.max(R, G, B) - Math.min(R, G, B);
+      if (Y > 0.62 && chroma < 0.12) paper[(y >> 1) * GW + (x >> 1)] += 0.25;
+    }
+    // smooth 3×3, then threshold into board cells
+    const core = new Float32Array(GW * GH);
+    let total = 0;
+    for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+      let s = 0, c = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const yy = y + dy, xx = x + dx; if (yy < 0 || xx < 0 || yy >= GH || xx >= GW) continue; s += paper[yy * GW + xx]; c++;
+      }
+      core[y * GW + x] = s / c > 0.55 ? 1 : 0; total += core[y * GW + x];
+    }
+    // scene check: if under 25% of the frame is board, it's a camera or photo shot, so invert nothing
+    const gate = total / (GW * GH) >= 0.25;
+    for (let i = 0; i < GW * GH; i++) {
+      const target = gate ? core[i] : 0;
+      gridState[i] = target < gridState[i] ? target : gridState[i] + (target - gridState[i]) * 0.5; // switch off fast, on a bit slower
+    }
+    for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+      let near = 0;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        const yy = y + dy, xx = x + dx; if (yy >= 0 && xx >= 0 && yy < GH && xx < GW) near = Math.max(near, gridState[yy * GW + xx]);
+      }
+      const o = (y * GW + x) * 4, c = gridState[y * GW + x];
+      gridImg.data[o] = c * 255; gridImg.data[o + 1] = near * 255; gridImg.data[o + 2] = 0; gridImg.data[o + 3] = 255;
+    }
+    gx.putImageData(gridImg, 0, 0);
+    feImg.setAttribute('href', gridCv.toDataURL());
+  }
+
+  return {
+    sync() {
+      const want = enabled && (algo === 'adapt' || algo === 'grid');
+      if (want && !running) { running = true; lastT = -1; v.requestVideoFrameCallback(frame); }
+      if (!want) { running = false; stats.textContent = algo === 'off' || !enabled ? 'filter off · sampler idle' : 'no JavaScript running for this algorithm'; }
+    }
+  };
+})();
+
+apply();
+
+// ---- results table (filled from results.json when present) ----------------
+fetch('results.json').then(r => r.ok ? r.json() : null).then(res => {
+  if (!res) return;
+  const el = document.getElementById('results');
+  const names = { classic: 'A Classic', hue: 'B Hue-safe', adapt: 'C Adaptive', board: 'D Smart board', grid: 'E Board + check', dim: 'F Dim', off: 'Original' };
+  const scenes = Object.keys(res.scenes);
+  let h = '<table><thead><tr><th>Algorithm</th>' + scenes.map(s => `<th>${s}</th>`).join('') + '<th>Peak in rapid cuts (2.5×)</th></tr></thead><tbody>';
+  for (const [k, label] of Object.entries(names)) {
+    if (!res.scenes[scenes[0]][k]) continue;
+    h += `<tr><td>${label}</td>` + scenes.map(s => { const m = res.scenes[s][k]; const cls = m.mean <= 0.15 ? 'ok' : m.mean > 0.3 ? 'no' : ''; return `<td class="${cls}">${m.mean.toFixed(2)} / ${m.p95.toFixed(2)}</td>`; }).join('');
+    const f = res.peak[k]; h += `<td class="${f <= 0.3 ? 'ok' : 'no'}">${f.toFixed(2)}</td></tr>`;
+  }
+  el.innerHTML = h + '</tbody></table>';
+}).catch(() => {});
+</script>

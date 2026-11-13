@@ -1,5 +1,21 @@
 # Night Lecture Mode: research and plan
 
+> **Update (round 2).** The lab in `research/` replaced the "adaptive global" recommendation below.
+> Live comparison: `research/lab/index.html`. Results and prior art: `research/README.md`.
+>
+> - **Default algorithm: D "Smart board".** It is a pure SVG filter graph with no JavaScript per frame. It inverts only
+>   bright, colourless board regions. Faces, photos, blackboards and dark slides are only dimmed. It passed every
+>   test scene and was the only method without a flash on rapid cuts at 2.5×.
+> - Still to fix in D:
+>   - Grey slides are only dimmed. Fix idea: per-cell background estimation, as in Zhang & He.
+>   - Colour blocks in diagrams show a gradient where the board mask fades.
+> - The other algorithms (B hue-safe, C adaptive, F dim only) stay selectable as modes in the extension.
+> - Decisions from you:
+>   - **O** toggles on every site, with **Alt+O** as a backup.
+>   - The extension (not YouTube) remembers the on/off state.
+>   - Watching at 2.5× is the norm, so anything driven by the sampler must not be the safety mechanism.
+> - Ctrl+I is still rejected: it opens Page Info in Firefox and means italic in text fields.
+
 Goal: a very small browser extension that makes lecture videos comfortable to watch in a
 pitch-dark room. Whiteboard videos become dark; blackboard and dark videos **stay** dark;
 nothing ever "flashbangs" the viewer.
