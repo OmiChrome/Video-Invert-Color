@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Midnight Owl: Dark Mode for Lectures",
   "short_name": "Midnight Owl",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Watch lectures and videos in a dark room. Turns bright boards and slides dark; keeps faces, photos and colours natural. Press O.",
   "icons": {
     "16": "icons/on-16.png",

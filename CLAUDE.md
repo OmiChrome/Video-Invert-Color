@@ -31,6 +31,7 @@ cd research/lab && python3 -m http.server               # the lab page (original
 - `test/run.js` is one sequential script with no per-test filter. It serves `test/pages/` on :8770, using `localhost` and `127.0.0.1` for cross-origin cases.
 - The tests launch a persistent context with `channel: 'chromium'` and `--load-extension`.
 - The tests copy `research/lab/demo.mp4` into `test/pages/` (gitignored).
+- `test/pages/player.html` is a YouTube-style watch page (custom controls, theater mode, search box, in-page navigation). Serve `test/pages/` and open it to try any local video by hand (file picker or `?src=`).
 
 ## Architecture
 
@@ -40,9 +41,10 @@ Content scripts load in the order `filters.js` → `engine.js` → `content.js` 
 
 - **`OwlGL`** is the WebGL2 pipeline.
   - All analysis passes run on a 135-row grid (240×135 for 16:9, ≈8 px cells at 1080p) and end in a small decision texture.
-  - The only full-resolution pass reads the video frame plus that texture. The file header lists the passes and why they exist.
-  - Mode `'mask'` renders the decision maps for debugging.
-  - The low-end GPU budget lives in the full-size pass. Put new logic on the grid, not there.
+  - The only full-resolution pass reads the video frame plus that texture, and a few neighbours only along edges and coloured marks. The file header lists the passes and why they exist.
+  - Mode `'mask'` renders the decision maps for debugging (red board, green flipped, blue solid).
+  - The low-end GPU budget lives in the full-size pass. Put new logic on the grid, not there, and keep grid min/max separable (row + column passes).
+  - Text first: every mark on paper (black or coloured) must flip as a whole. Never decide per stroke in a way that can split a letter; that was v1.1's "hatched letters" bug.
 - **`OwlVideo`** manages one `<video>`.
   - It inserts a canvas as the video's next sibling.
   - Placement uses `getBoundingClientRect` deltas divided by the measured scale, so it works with page zoom and scaled parents. It clips to overflow ancestors and re-places on resize, mutation and scroll.
@@ -96,7 +98,7 @@ Content scripts load in the order `filters.js` → `engine.js` → `content.js` 
   - Compare original/processed crops at native resolution and check the `'mask'` view.
 - This container has no GPU (software GL), so performance numbers here are only relative. The on-video stats and the saved log give real numbers on the owner's machine.
 - YouTube shows automated browsers a bot check. Test on local pages and videos instead.
-- **Sam O'Nella footage:** the owner has permission for research use. It may live under `research/` with attribution, but must not be used in `site/`, `store/` or README media.
+- **Sam O'Nella footage:** the owner has permission for research use. The tuning frames live in `research/pliny/` (originals, v1.2 renders, attribution). They must not be used in `site/`, `store/` or README media.
 - A service worker can't message itself. In tests, clear the log with `sw.evaluate(() => { log = []; return chrome.storage.session.set({ owlLog: [] }); })`.
 
 ## Commits

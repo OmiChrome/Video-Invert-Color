@@ -15,7 +15,7 @@ Press <kbd>O</kbd>. Whiteboards turn dark. Faces, photos and colours stay as the
 ![Android](https://img.shields.io/badge/Android-Firefox-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![WebGL2](https://img.shields.io/badge/engine-WebGL2-555?style=flat-square)
 ![Manifest V3](https://img.shields.io/badge/Manifest-V3-555?style=flat-square)
-![Size](https://img.shields.io/badge/size-~80_KB-555?style=flat-square)
+![Size](https://img.shields.io/badge/size-~50_KB-555?style=flat-square)
 ![No tracking](https://img.shields.io/badge/data_collected-none-2ea44f?style=flat-square)
 ![License: MIT](https://img.shields.io/badge/license-MIT-555?style=flat-square)
 
@@ -35,7 +35,7 @@ Press <kbd>O</kbd>. Whiteboards turn dark. Faces, photos and colours stay as the
 
 | Mode | |
 |---|---|
-| **Smart** (default) | Paper and the lines on it flip. Everything else stays. |
+| **Smart** (default) | Paper goes dark, text and drawings on it go light. Pictures, faces and big shapes stay. |
 | **Invert** | The whole video flips, colours kept |
 | **Dim** | Darker, nothing flips |
 
@@ -51,6 +51,7 @@ Press <kbd>O</kbd>. Whiteboards turn dark. Faces, photos and colours stay as the
 ```bash
 python3 build.py       # zips in dist/
 node test/run.js       # end-to-end tests in Chromium
+cd test/pages && python3 -m http.server 8770   # then open localhost:8770/player.html to try any video
 ```
 
 [How it works](research/README.md) · [Publishing](docs/PUBLISHING.md) · [Website source](site/)
@@ -58,3 +59,4 @@ node test/run.js       # end-to-end tests in Chromium
 ## License
 
 [MIT](LICENSE) © OmiChrome. Use it, change it, fork it; just keep the credit.
+The research frames in `research/pliny/` are © Sam O'Nella Academy, used with permission, and not covered by the license.

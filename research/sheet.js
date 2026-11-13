@@ -5,8 +5,8 @@ const { execFileSync } = require('child_process');
 const fs = require('fs'), path = require('path'), os = require('os');
 const LAB = path.join(__dirname, 'lab'), tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sheet-'));
 const SCENES = [['Whiteboard', 2.5], ['Blackboard', 7], ['Slide + face', 11], ['Face', 15], ['Dark slide', 18.5], ['Grey slide', 21.5], ['Photo', 32.5], ['Uneven light', 35.5], ['Teacher', 39]];
-// Original, the classic CSS invert most extensions use, Midnight Owl 1.0 (SVG filter), Midnight Owl 1.1 (WebGL engine).
-const MODES = [['Original', 'none'], ['Classic invert', 'invert(1)'], ['v1.0 SVG filter', 'url(#owl-smart)'], ['v1.1 engine', 'gl']];
+// Original, the classic CSS invert most extensions use, Midnight Owl 1.0 (SVG filter), Midnight Owl 1.2 (WebGL engine).
+const MODES = [['Original', 'none'], ['Classic invert', 'invert(1)'], ['v1.0 SVG filter', 'url(#owl-smart)'], ['v1.2 engine', 'gl']];
 for (const [, t] of SCENES) execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-ss', String(t), '-i', path.join(LAB, 'demo.mp4'), '-frames:v', '1', path.join(tmp, `${t}.png`)]);
 const cell = 'width:300px;height:169px;display:block';
 const html = `<!doctype html><meta charset="utf-8"><body style="margin:0;background:#0b0c10;font:600 15px system-ui;color:#e6e7ea;padding:8px">

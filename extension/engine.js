@@ -236,13 +236,18 @@ void main() {
     vec2 slope = vec2(dFdx(D.b + D.a), dFdy(D.b + D.a));
     // Three zones inside a board: well inside a big solid (keep it), its rim (about one cell around it), and
     // everywhere else.
-    float wIn = smoothstep(0.6, 0.95, D.b);
-    float wRim = (1.0 - wIn) * smoothstep(0.1, 0.4, D.a);
-    float wFree = 1.0 - wIn - wRim;
     // Pale = colourless (paper, grey, black ink), or bright with a slight tint: video stores colour at half
     // resolution, so white pixels next to coloured letters pick up their tint.
     float paperish = smoothstep(0.75, 0.85, yn) * (1.0 - smoothstep(0.08, 0.15, chroma(c)));
     float pale = max(neutral(c), paperish);
+    // Plain paper never counts as inside at a solid's outer edge, where the inside map falls from 1 to 0 within a
+    // cell: that is the sliver of paper in a grid cell that is mostly solid (round shapes would get a white, blocky
+    // fringe). Inside a walled-in pocket (white glyphs in an icon) the map is flat, so those stay.
+    float plainPaper = pale * smoothstep(0.75, 0.9, yn);
+    float edge = length(vec2(dFdx(D.b), dFdy(D.b)) * uCell / uPx);   // change of the inside map per cell
+    float wIn = smoothstep(0.6, 0.95, D.b) * (1.0 - plainPaper * smoothstep(0.25, 0.5, edge));
+    float wRim = (1.0 - wIn) * smoothstep(0.1, 0.4, D.a);
+    float wFree = 1.0 - wIn - wRim;
     float fFree = pale, fRim = 0.0, a = 0.0;   // how much flips (everywhere else / rim); a: paper share at the rim
     vec3 P = vec3(level);                      // the paper's colour next to this pixel
     if (D.r > 0.01 && wIn < 0.99 && (pale < 0.99 || wRim > 0.01)) {
