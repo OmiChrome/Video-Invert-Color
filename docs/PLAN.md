@@ -1,6 +1,6 @@
 # Night Lecture Mode: research and plan
 
-> **Status (round 3): built.** The extension is in `extension/` and is tested by `test/run.js`. Smart mode = algorithm D with grey-board normalisation and the colour-block fix. Keys: **O** on any page with a video, **Alt+O** as backup. The toolbar owl lights up while it is working.
+> **Status: v1.1 shipped.** The extension is in `extension/`, with a WebGL engine (`extension/engine.js`) that replaced the SVG filter below; see `research/README.md` (round 4) for how it works and the benchmark. Keys: **O** on any page with a video, **Alt+O** as backup. The toolbar owl lights up while it is working.
 
 > **Update (round 2).** The lab in `research/` replaced the "adaptive global" recommendation below.
 > Live comparison: `research/lab/index.html`. Results and prior art: `research/README.md`.
