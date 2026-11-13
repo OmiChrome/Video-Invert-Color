@@ -60,7 +60,7 @@ Send me the two store links and I'll switch the README badges from "coming soon"
 ## Updating later
 
 1. Bump `"version"` in `extension/manifest.json` (for example `1.1.1`) and add `docs/releases/v1.1.1.md`.
-2. Push a tag `v1.1.1`: GitHub Actions builds the zips and publishes the release.
+2. Push to `main`: GitHub Actions builds the zips and publishes the release `v1.1.1` with them.
 3. Firefox: your add-on → **Upload New Version**. Edge: your extension → **Packages** → **Replace** → **Publish**.
 
 ## Chrome (later)

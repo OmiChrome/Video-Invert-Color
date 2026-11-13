@@ -1,7 +1,9 @@
 name: Release
+# Every push to main builds and lints the zips. If extension/manifest.json has a version that has no GitHub
+# release yet, the release (tag v<version>, notes from docs/releases/v<version>.md, the three zips) is created.
 on:
   push:
-    tags: ['v*']
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -27,13 +29,30 @@ jobs:
         with:
           name: midnight-owl-zips
           path: dist/*.zip
+      - name: Version
+        id: v
+        run: echo "tag=v$(python3 -c "import json; print(json.load(open('extension/manifest.json'))['version'])")" >> "$GITHUB_OUTPUT"
+      - name: Already released?
+        id: seen
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.v.outputs.tag }}" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            echo "yes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "yes=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Publish the GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name != 'pull_request' && steps.seen.outputs.yes == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          name: Midnight Owl ${{ github.ref_name }}
-          body_path: docs/releases/${{ github.ref_name }}.md
+          tag_name: ${{ steps.v.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Midnight Owl ${{ steps.v.outputs.tag }}
+          body_path: docs/releases/${{ steps.v.outputs.tag }}.md
           files: dist/*.zip
+          make_latest: true
 
   test:
     runs-on: ubuntu-latest
