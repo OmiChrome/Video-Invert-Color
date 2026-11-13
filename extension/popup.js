@@ -1,6 +1,6 @@
 'use strict';
 const api = globalThis.browser ?? globalThis.chrome;
-const DEFAULTS = { on: false, mode: 'smart', warm: false, cap: 0.8, debug: false };
+const DEFAULTS = { on: false, mode: 'smart', warm: false, cap: 0.8, debug: false, smooth: false };
 const form = document.forms[0];
 
 function show(s) {
@@ -9,11 +9,12 @@ function show(s) {
   form.cap.value = s.cap;
   form.warm.checked = s.warm;
   form.debug.checked = s.debug;
+  form.smooth.checked = s.smooth;
   document.getElementById('owl').src = `icons/${s.on ? 'on' : 'off'}-48.png`;
 }
 
 form.addEventListener('change', () => {
-  const s = { on: form.on.checked, mode: form.mode.value, cap: +form.cap.value, warm: form.warm.checked, debug: form.debug.checked };
+  const s = { on: form.on.checked, mode: form.mode.value, cap: +form.cap.value, warm: form.warm.checked, debug: form.debug.checked, smooth: form.smooth.checked };
   api.storage.local.set(s).then(() => show(s));
 });
 

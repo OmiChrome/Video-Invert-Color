@@ -2,7 +2,7 @@
 // The picture work happens in engine.js (WebGL on the GPU); filters.js is the CSS fallback.
 'use strict';
 const owlApi = globalThis.browser ?? globalThis.chrome;
-const OWL_DEFAULTS = { on: false, mode: 'smart', warm: false, cap: 0.8, debug: false, engine: 'auto' };
+const OWL_DEFAULTS = { on: false, mode: 'smart', warm: false, cap: 0.8, debug: false, smooth: false, engine: 'auto' };
 let owl = { ...OWL_DEFAULTS };
 const owlVideos = new Map();          // <video> -> OwlVideo
 let owlSvg = null, owlStyle = null, owlPort = null, owlDead = false, owlMo = null;

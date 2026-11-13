@@ -1,15 +1,18 @@
 // Midnight Owl engine: draws each video frame through a small WebGL2 pipeline into a canvas laid over the video.
 //
-// All decisions are made on a tiny 240×135 grid (≈8 px cells at 1080p); the full-size pass only reads the frame
-// and one decision value per pixel, so the cost per frame is about the same as a plain copy.
+// Text first: anything darker than the paper flips to light (text, pen, lines, outlines), unless it belongs to a
+// big solid shape (box, bar, pie, hair, photo), and the paper flips to near-black. All decisions are made on a tiny
+// 240×135 grid (≈8 px cells at 1080p), so the full-size pass is two texture reads and a little arithmetic per
+// pixel, light enough for an old integrated GPU.
 //
-//   1 stats    per cell: paper share (bright, colourless), paper brightness, pure-white share, colourful share
+//   1 stats    per cell: paper share (bright, colourless), paper brightness, pure-white share
 //              + mipmaps = free large-scale averages
 //   2 board    may this area flip? paper scenes vs. illustrated scenes, grown one block to reach paper edges;
-//              also the local paper brightness (so grey and unevenly lit boards go fully dark) and "is this a line"
-//   3-4 close  fill tiny gaps in the line map so bold, tight words flip as a whole
-//   5 decide   per cell: flip lines? flip paper (unless it is a white glyph walled in by a solid fill)?
-//   6 picture  per pixel: flip or keep, with a soft highlight roll-off for everything kept
+//              also the local paper brightness, so grey and unevenly lit boards go fully dark
+//   3-4 open   "big solid" map: shrink the non-paper areas by 3 cells, grow them back. Text strokes, pen lines and
+//              small marks vanish; boxes, bars, pies, hair and photos come back at their exact size
+//   5 decide   per cell: board · paper level · big solid
+//   6 picture  per pixel: flip paper and ink, keep big solids, soft highlight roll-off for everything kept
 //
 // Everything is decided from the frame being shown, so cuts never flash, at any playback speed.
 'use strict';
@@ -40,20 +43,21 @@ float neutral(vec3 c) { return 1.0 - smoothstep(0.03, 0.06, chroma(c)); }
 float paperness(vec3 c, float y) { return neutral(c) * smoothstep(0.45, 0.6, y); }
 `;
 
+// Pass 1 (small grid): 16 samples per cell, at texel corners so each one averages 2×2 pixels (all 64 at 1080p).
 const OWL_STATS_FS = OWL_COMMON + `
 void main() {
-  float P = 0.0, PY = 0.0, WHITE = 0.0, COL = 0.0;
+  float P = 0.0, PY = 0.0, WHITE = 0.0, DARK = 0.0;
   for (int j = 0; j < 4; j++) for (int i = 0; i < 4; i++) {
     vec3 c = src0(vUv + (vec2(float(i), float(j)) - 1.5) * 0.25 * uCell);
     float y = dot(c, W), p = paperness(c, y);
-    P += p; PY += p * y; WHITE += neutral(c) * smoothstep(0.88, 0.95, y); COL += smoothstep(0.1, 0.25, chroma(c));
+    P += p; PY += p * y; WHITE += neutral(c) * smoothstep(0.88, 0.95, y); DARK += 1.0 - smoothstep(0.35, 0.5, y);
   }
-  // R: paper share · G: paper-weighted brightness · B: pure-white share · A: colourful share
-  o = vec4(P, PY, WHITE, COL) * 0.0625;
+  // R: paper share · G: paper-weighted brightness · B: pure-white share · A: dark-ink share
+  o = vec4(P, PY, WHITE, DARK) * 0.0625;
 }`;
 
-// Pass 2 (same small grid): where may we flip? One value per cell, grown by one block so a qualifying paper
-// area flips right up to its edges. Also the local paper brightness used to normalise grey or unevenly lit boards.
+// Pass 2 (small grid): where may we flip? One value per cell, grown by one block so a qualifying paper area flips
+// right up to its edges. Also the local paper brightness used to normalise grey or unevenly lit boards.
 const OWL_BOARD_FS = OWL_COMMON + `
 uniform sampler2D uStats;
 float boardAt(vec2 uv, float g) {
@@ -69,77 +73,62 @@ float boardAt(vec2 uv, float g) {
 void main() {
   // Whole-frame paper share: paper scenes are ~75-97 % paper, illustrated ones well under 50 %.
   float g = smoothstep(0.5, 0.7, textureLod(uStats, vec2(0.5), 12.0).r);
-  float b0 = boardAt(vUv, g), b = b0;
+  float b = boardAt(vUv, g);
   vec2 d = uCell * 8.0;
   for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++)
     if (i != 0 || j != 0) b = max(b, boardAt(vUv + vec2(float(i), float(j)) * d, g));
   vec4 L3 = textureLod(uStats, vUv, 3.0), L4 = textureLod(uStats, vUv, 4.0);
   float level = mix(L4.g / max(L4.r, 1e-3), L3.g / max(L3.r, 1e-3), smoothstep(0.3, 0.6, L3.r));
-  // Is this cell part of a line or of text? Paper on both sides at 2 cells, horizontally or vertically; also at
-  // 4 cells for colourless ink (thick black strokes, bold titles). Coloured fills (hair, badges, bars) only get
-  // the near test, so only their thin outline area could ever count as a line.
-  float ink = 0.0, far = 1.0 - smoothstep(0.3, 0.6, textureLod(uStats, vUv, 0.0).a);
-  for (int k = 2; k <= 4; k += 2) {
-    vec2 dx = vec2(uCell.x * float(k), 0.0), dy = vec2(0.0, uCell.y * float(k));
-    float t = max(min(textureLod(uStats, vUv + dx, 0.0).r, textureLod(uStats, vUv - dx, 0.0).r),
-                  min(textureLod(uStats, vUv + dy, 0.0).r, textureLod(uStats, vUv - dy, 0.0).r));
-    ink = max(ink, k == 2 ? t : t * far);
-  }
-  o = vec4(b, clamp(level, 0.0, 1.0), ink, b0);
+  o = vec4(b, clamp(level, 0.0, 1.0), textureLod(uStats, vUv, 0.0).a, 1.0);   // B: dark-ink share of this cell
 }`;
 
-// Passes 3 and 4 (small grid): morphological closing of the ink map (grow one cell, then shrink one cell).
-// Fills the tiny gaps inside bold, tightly spaced words so they flip as a whole, without growing into boxes.
-const OWL_MORPH_FS = OWL_COMMON + `
+// Passes 3-4 (small grid): opening of the "not paper" map. Shrink (min over 7×7 cells), then grow (max over 7×7).
+// Anything thinner than ~7 cells (56 px at 1080p: letters, bold titles, pen strokes, outlines, small marks) is gone
+// afterwards; boxes, bars, pies, hair and photos come back with their exact outline.
+const OWL_OPEN_FS = OWL_COMMON + `
 uniform sampler2D uIn;
-uniform int uGrow;   // 1 = max (grow), 0 = min (shrink)
-uniform int uChan;   // read channel: 2 = board.b, 0 = .r
+uniform int uGrow;   // 0: shrink, reading 1 - paper share from the stats (.r); 1: grow, reading .r
 void main() {
   float v = uGrow == 1 ? 0.0 : 1.0;
-  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
-    vec4 t = texture(uIn, vUv + vec2(float(i), float(j)) * uCell);
-    float x = uChan == 2 ? t.b : t.r;
-    v = uGrow == 1 ? max(v, x) : min(v, x);
+  for (int j = -3; j <= 3; j++) for (int i = -3; i <= 3; i++) {
+    float x = texture(uIn, vUv + vec2(float(i), float(j)) * uCell).r;
+    v = uGrow == 1 ? max(v, x) : min(v, 1.0 - x);
   }
   o = vec4(v, 0.0, 0.0, 1.0);
 }`;
 
-// Pass 5 (small grid): the per-cell decisions the picture pass needs.
+// Pass 5 (small grid): the per-cell values the picture pass needs, in one texture.
 const OWL_DECIDE_FS = OWL_COMMON + `
-uniform sampler2D uStats, uBoard, uIn;
-float solid(vec2 uv) { return (1.0 - textureLod(uStats, uv, 0.0).r) * (1.0 - texture(uIn, uv).r); }
+uniform sampler2D uBoard, uIn;
 void main() {
   vec4 B = texture(uBoard, vUv);
-  // Walled paper: a SOLID fill (not paper, not text) on both sides along at least two directions = a white glyph
-  // inside a badge or box; it stays white. A gap between lines of text, or between two shapes (one direction
-  // only), still goes dark.
-  vec2 dx = vec2(uCell.x * 2.0, 0.0), dy = vec2(0.0, uCell.y * 2.0), d1 = (dx + dy) * 0.7071, d2 = (dx - dy) * 0.7071;
-  float wa = min(solid(vUv + dx), solid(vUv - dx)), wb = min(solid(vUv + dy), solid(vUv - dy));
-  float wc = min(solid(vUv + d1), solid(vUv - d1)), we = min(solid(vUv + d2), solid(vUv - d2));
-  float walled = max(max(max(min(wa, wb), min(wa, wc)), max(min(wa, we), min(wb, wc))), max(min(wb, we), min(wc, we)));
-  // R board · G paper brightness · B flip lines here · A flip paper here
-  o = vec4(B.r, B.g, smoothstep(0.2, 0.45, texture(uIn, vUv).r), 1.0 - smoothstep(0.55, 0.85, walled));
+  // R board · G paper brightness · B big solid shape here (keep it as it is)
+  o = vec4(B.r, B.g, smoothstep(0.8, 0.95, texture(uIn, vUv).r), 1.0);
 }`;
 
 // Pass 6 (screen size): the picture.
 const OWL_MAIN_FS = OWL_COMMON + `
 uniform sampler2D uDecide;
+uniform vec2 uPx;        // one output pixel in uv
 uniform int uMode;       // 0 smart, 1 invert, 2 dim, 3 smart + mask view (diagnostics)
 uniform float uCap;      // brightest flipped ink
 uniform vec3 uTint;
 const float DARK = 0.06;
 
-// Soft highlight roll-off: shadows and mid-tones untouched, whites capped near 0.85·cap.
+// Soft highlight roll-off: shadows and mid-tones untouched, whites capped near 0.85·cap. (Cheap rational knee.)
 vec3 keep(vec3 c, float y) {
   float knee = 0.35, room = max(uCap * 0.85 - knee, 0.05);
-  float y2 = y < knee ? y : knee + room * (1.0 - exp(-(y - knee) / room));
+  float t = max(y - knee, 0.0) / room;
+  float y2 = y < knee ? y : knee + room * t / (1.0 + t);
   return c * (y2 / max(y, 1e-4));
 }
-// Brightness flip that keeps hue: the paper level becomes DARK, the darkest ink becomes uCap.
-vec3 flip(vec3 c, float y, float level) {
+// Brightness flip that keeps hue: the paper level becomes DARK, ink becomes uCap.
+// crisp (Smart mode): paper with its faint noise and shadows goes to clean black, real ink to full brightness,
+// and the anti-aliased edges in between keep their proportions, so letters keep their true shape.
+vec3 flip(vec3 c, float y, float level, bool crisp) {
   vec3 cn = min(c / level, 1.0);
-  float yn = min(y / level, 1.0);
-  float yt = DARK + (uCap - DARK) * pow(1.0 - yn, 1.2);
+  float yn = min(y / level, 1.0), t = 1.0 - yn;
+  float yt = DARK + (uCap - DARK) * (crisp ? clamp((t - 0.06) / 0.54, 0.0, 1.0) : t);
   return clamp(cn + (yt - yn), 0.0, 1.0);
 }
 
@@ -150,14 +139,25 @@ void main() {
   if (uMode == 2) {
     outc = keep(c, y);
   } else if (uMode == 1) {
-    outc = flip(c, y, 1.0);
+    outc = flip(c, y, 1.0, false);
   } else {
     vec4 D = texture(uDecide, vUv);
-    float level = max(D.g, 0.45);
-    float isPaper = neutral(c) * smoothstep(0.6, 0.8, y / level);
-    float f = D.r * mix(D.b, D.a, isPaper);
-    outc = mix(keep(c, y), flip(c, y, level), f);
-    if (uMode == 3) outc = mix(vec3(y) * 0.35, vec3(D.r, f, isPaper), 0.8);   // red board · green flipped · blue paper
+    float level = max(D.g, 0.45), yn = y / level;
+    // Inside a board, outside big solid shapes, flip:
+    //   · everything colourless: paper, grey edges, black and grey ink
+    //   · anything darker than the paper: coloured pen and text
+    //   · light colours right next to a much darker pixel: the anti-aliased edges of coloured letters
+    // Light colours away from ink (a yellow highlighter, a light fill) stay as they are, so they stay readable.
+    float room = D.r * (1.0 - D.b);
+    float g = max(neutral(c), 1.0 - smoothstep(0.55, 0.75, yn));
+    if (room > 0.01 && g < 0.99) {
+      vec2 dx = vec2(uPx.x * 1.5, 0.0), dy = vec2(0.0, uPx.y * 1.5);
+      float n = min(min(dot(src(vUv + dx), W), dot(src(vUv - dx), W)), min(dot(src(vUv + dy), W), dot(src(vUv - dy), W)));
+      g = max(g, 1.0 - smoothstep(0.45, 0.65, n / level));
+    }
+    float f = room * g;
+    outc = mix(keep(c, y), flip(c, y, level, true), f);
+    if (uMode == 3) outc = mix(vec3(y) * 0.35, vec3(D.r, f, D.b), 0.8);   // red board · green flipped · blue big solid
   }
   o = vec4(outc * uTint, 1.0);
 }`;
@@ -181,41 +181,44 @@ function owlPrograms(gl, defs) {
 }
 
 // The GPU part. Usable with any image source: <video>, <img>, <canvas>, ImageBitmap.
-// Texture units: 0 = video frame, 1 = stats (mipmapped), 2 = board, 3 = line map (scratch), 4 = line map (closed),
-// 5 = decisions.
+// Texture units: 0 = video frame, 1 = stats (mipmapped), 2 = board, 3 = opening scratch, 4 = big solids, 5 = decisions.
 class OwlGL {
   constructor(canvas) {
-    const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, preserveDrawingBuffer: false });
+    const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, preserveDrawingBuffer: false, powerPreference: 'low-power' });
     if (!gl) throw Object.assign(new Error('WebGL2 is not available'), { name: 'NoWebGL2' });
     this.gl = gl;
-    [this.stats, this.board, this.morph, this.decide, this.main] = owlPrograms(gl, [
+    [this.stats, this.board, this.open, this.decide, this.main] = owlPrograms(gl, [
       [OWL_STATS_FS, ['uSrc', 'uSrcRect', 'uCell']],
       [OWL_BOARD_FS, ['uStats', 'uCell']],
-      [OWL_MORPH_FS, ['uIn', 'uCell', 'uGrow', 'uChan']],
-      [OWL_DECIDE_FS, ['uStats', 'uBoard', 'uIn', 'uCell']],
-      [OWL_MAIN_FS, ['uSrc', 'uSrcRect', 'uDecide', 'uMode', 'uCap', 'uTint']],
+      [OWL_OPEN_FS, ['uIn', 'uCell', 'uGrow']],
+      [OWL_DECIDE_FS, ['uBoard', 'uIn', 'uCell']],
+      [OWL_MAIN_FS, ['uSrc', 'uSrcRect', 'uDecide', 'uPx', 'uMode', 'uCap', 'uTint']],
     ]);
     this.vao = gl.createVertexArray();
-    this.statsFbo = gl.createFramebuffer();
-    this.boardFbo = gl.createFramebuffer();
-    this.inkFbo = [gl.createFramebuffer(), gl.createFramebuffer()];
-    this.decideFbo = gl.createFramebuffer();
-    this.srcTex = this.texture(0, 1, 1, false, true);
-    this.statsTex = this.boardTex = this.decideTex = null; this.inkTex = []; this.gw = this.gh = 0; this.srcMips = false;
+    this.fbo = { stats: gl.createFramebuffer(), board: gl.createFramebuffer(), open: [gl.createFramebuffer(), gl.createFramebuffer()], decide: gl.createFramebuffer() };
+    this.tex = {};
+    this.src = { tex: null, w: 0, h: 0, mips: false };
+    this.gw = this.gh = 0;
     this.mode = 0; this.cap = 0.8; this.tint = [1, 1, 1];
     this.timer = null;
   }
 
-  texture(unit, w, h, mipmapped, mutable) {
+  texture(unit, w, h, levels) {
     const gl = this.gl, t = gl.createTexture();
     gl.activeTexture(gl.TEXTURE0 + unit);
     gl.bindTexture(gl.TEXTURE_2D, t);
-    if (!mutable) gl.texStorage2D(gl.TEXTURE_2D, mipmapped ? Math.floor(Math.log2(Math.max(w, h))) + 1 : 1, gl.RGBA8, w, h);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mipmapped ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
+    gl.texStorage2D(gl.TEXTURE_2D, levels, gl.RGBA8, w, h);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, levels > 1 ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     return t;
+  }
+
+  target(fbo, tex) {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
   }
 
   set({ mode = 'smart', cap = 0.8, warm = false }) {
@@ -228,23 +231,31 @@ class OwlGL {
   grid(aspect) {
     const gh = 135, gw = Math.max(16, Math.min(512, Math.round(gh * aspect)));
     if (gw === this.gw && gh === this.gh) return;
-    const gl = this.gl;
-    if (this.statsTex) for (const t of [this.statsTex, this.boardTex, this.decideTex, ...this.inkTex]) gl.deleteTexture(t);
-    this.statsTex = this.texture(1, gw, gh, true);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.statsFbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.statsTex, 0);
-    this.boardTex = this.texture(2, gw, gh, false);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.boardFbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.boardTex, 0);
-    this.inkTex = [this.texture(3, gw, gh, false), this.texture(4, gw, gh, false)];
-    for (let i = 0; i < 2; i++) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.inkFbo[i]);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.inkTex[i], 0);
-    }
-    this.decideTex = this.texture(5, gw, gh, false);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, this.decideFbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.decideTex, 0);
+    const gl = this.gl, T = this.tex;
+    for (const t of Object.values(T).flat()) gl.deleteTexture(t);
+    T.stats = this.texture(1, gw, gh, Math.floor(Math.log2(Math.max(gw, gh))) + 1);
+    T.board = this.texture(2, gw, gh, 1);
+    T.open = [this.texture(3, gw, gh, 1), this.texture(4, gw, gh, 1)];
+    T.decide = this.texture(5, gw, gh, 1);
+    this.target(this.fbo.stats, T.stats);
+    this.target(this.fbo.board, T.board);
+    this.target(this.fbo.open[0], T.open[0]);
+    this.target(this.fbo.open[1], T.open[1]);
+    this.target(this.fbo.decide, T.decide);
     this.gw = gw; this.gh = gh;
+  }
+
+  // The video frame goes into a texture allocated once per video size (texSubImage2D: no reallocation per frame).
+  upload(source, sw, sh, mips) {
+    const gl = this.gl, S = this.src;
+    gl.activeTexture(gl.TEXTURE0);
+    if (!S.tex || S.w !== sw || S.h !== sh || S.mips !== mips) {
+      if (S.tex) gl.deleteTexture(S.tex);
+      S.tex = this.texture(0, sw, sh, mips ? Math.floor(Math.log2(Math.max(sw, sh))) + 1 : 1);
+      Object.assign(S, { w: sw, h: sh, mips });
+    } else gl.bindTexture(gl.TEXTURE_2D, S.tex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    if (mips) gl.generateMipmap(gl.TEXTURE_2D);
   }
 
   // Optional GPU timing (only where the browser exposes the timer extension). Returns the last measured ms or null.
@@ -262,73 +273,54 @@ class OwlGL {
   }
 
   render(source, rect = [0, 0, 1, 1], timed = false) {
-    const gl = this.gl, canvas = gl.canvas;
+    const gl = this.gl, canvas = gl.canvas, T = this.tex;
     const sw = source.videoWidth || source.naturalWidth || source.width, sh = source.videoHeight || source.naturalHeight || source.height;
-    const t = timed && this.timer?.ext && !this.timer.q ? (this.timer.q = gl.createQuery()) : null;
-    if (t) gl.beginQuery(this.timer.ext.TIME_ELAPSED_EXT, t);
+    const q = timed && this.timer?.ext && !this.timer.q ? (this.timer.q = gl.createQuery()) : null;
+    if (q) gl.beginQuery(this.timer.ext.TIME_ELAPSED_EXT, q);
     gl.bindVertexArray(this.vao);
     this.grid((sw * rect[2]) / Math.max(1, sh * rect[3]));
-
-    // the frame
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.srcTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
-    const mips = sw * rect[2] > canvas.width * 1.6;   // big video in a small player: avoid shimmering text
-    if (mips) gl.generateMipmap(gl.TEXTURE_2D);
-    if (mips !== this.srcMips) { gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mips ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR); this.srcMips = mips; }
-
+    // mipmaps only when a big video is shown much smaller (they cost bandwidth on small GPUs)
+    this.upload(source, sw, sh, sw * rect[2] > canvas.width * 2);
     const cell = [1 / this.gw, 1 / this.gh];
+    const pass = (prog, fbo) => { gl.bindFramebuffer(gl.FRAMEBUFFER, fbo); gl.useProgram(prog.p); gl.uniform2fv(prog.u.uCell, cell); };
+    const bind = (unit, tex) => { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); };
     if (this.mode === 0 || this.mode === 3) {
-      // pass 1: stats + mip chain
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.statsFbo);
       gl.viewport(0, 0, this.gw, this.gh);
-      gl.useProgram(this.stats.p);
-      gl.uniform1i(this.stats.u.uSrc, 0);
-      gl.uniform4fv(this.stats.u.uSrcRect, rect);
-      gl.uniform2fv(this.stats.u.uCell, cell);
+      // 1 stats + mip chain
+      pass(this.stats, this.fbo.stats);
+      gl.uniform1i(this.stats.u.uSrc, 0); gl.uniform4fv(this.stats.u.uSrcRect, rect);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, this.statsTex);
-      gl.generateMipmap(gl.TEXTURE_2D);
-      // pass 2: board
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.boardFbo);
-      gl.useProgram(this.board.p);
+      bind(1, T.stats); gl.generateMipmap(gl.TEXTURE_2D);
+      // 2 board
+      pass(this.board, this.fbo.board);
       gl.uniform1i(this.board.u.uStats, 1);
-      gl.uniform2fv(this.board.u.uCell, cell);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-      // passes 3-4: close the ink map (grow from board.b into ink[0], shrink into ink[1])
-      gl.useProgram(this.morph.p);
-      gl.uniform2fv(this.morph.u.uCell, cell);
-      gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.boardTex);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.inkFbo[0]);
-      gl.uniform1i(this.morph.u.uIn, 2); gl.uniform1i(this.morph.u.uGrow, 1); gl.uniform1i(this.morph.u.uChan, 2);
+      // 3-4 opening: shrink stats → open[0], grow open[0] → open[1]
+      pass(this.open, this.fbo.open[0]);
+      gl.uniform1i(this.open.u.uIn, 1); gl.uniform1i(this.open.u.uGrow, 0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-      gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, this.inkTex[0]);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.inkFbo[1]);
-      gl.uniform1i(this.morph.u.uIn, 3); gl.uniform1i(this.morph.u.uGrow, 0); gl.uniform1i(this.morph.u.uChan, 0);
+      bind(3, T.open[0]);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo.open[1]);
+      gl.uniform1i(this.open.u.uIn, 3); gl.uniform1i(this.open.u.uGrow, 1);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-      // pass 5: per-cell decisions
-      gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, this.inkTex[1]);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.decideFbo);
-      gl.useProgram(this.decide.p);
-      gl.uniform1i(this.decide.u.uStats, 1); gl.uniform1i(this.decide.u.uBoard, 2); gl.uniform1i(this.decide.u.uIn, 4);
-      gl.uniform2fv(this.decide.u.uCell, cell);
+      // 5 decide
+      bind(2, T.board); bind(4, T.open[1]);
+      pass(this.decide, this.fbo.decide);
+      gl.uniform1i(this.decide.u.uBoard, 2); gl.uniform1i(this.decide.u.uIn, 4);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
-    // pass 6: the picture
-    gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, this.decideTex);
+    // 6 the picture
+    bind(5, T.decide);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, canvas.width, canvas.height);
     const m = this.main;
     gl.useProgram(m.p);
-    gl.uniform1i(m.u.uSrc, 0);
-    gl.uniform1i(m.u.uDecide, 5);
+    gl.uniform1i(m.u.uSrc, 0); gl.uniform1i(m.u.uDecide, 5);
     gl.uniform4fv(m.u.uSrcRect, rect);
-    gl.uniform1i(m.u.uMode, this.mode);
-    gl.uniform1f(m.u.uCap, this.cap);
-    gl.uniform3fv(m.u.uTint, this.tint);
+    gl.uniform2f(m.u.uPx, 1 / canvas.width, 1 / canvas.height);
+    gl.uniform1i(m.u.uMode, this.mode); gl.uniform1f(m.u.uCap, this.cap); gl.uniform3fv(m.u.uTint, this.tint);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    if (t) gl.endQuery(this.timer.ext.TIME_ELAPSED_EXT);
+    if (q) gl.endQuery(this.timer.ext.TIME_ELAPSED_EXT);
   }
 
   dispose() {
@@ -338,7 +330,7 @@ class OwlGL {
 
 // ---------------------------------------------------------------------------------------------
 // One <video> on the page: a canvas laid exactly over the picture, redrawn on every new video frame.
-// Falls back to the CSS/SVG filter (class "owl-css") when WebGL can't be used for this video.
+// Falls back to the CSS/SVG filter when WebGL can't be used for this video.
 
 const OWL_MAX_GL = 6;
 const OWL_EVENTS = ['loadstart', 'loadeddata', 'seeked', 'resize', 'emptied', 'ratechange', 'play', 'pause', 'encrypted', 'waitingforkey'];
@@ -564,8 +556,13 @@ class OwlVideo {
     if (v.readyState < 2 || !v.videoWidth) return;
     if (!this.box) this.place();
     const p = this.perf;
+    // Low-power default: process at most ~30 frames a second. At 2.5× a 24 fps lecture shows 60 frames a second;
+    // every other one is plenty for text and halves the GPU work. Seeks and paused frames are always drawn.
+    const now = performance.now();
+    if (meta && !this.s.smooth && !v.paused && now - (this.lastDraw || 0) < 29) { p.capped = (p.capped || 0) + 1; p.cappedSince = (p.cappedSince || 0) + 1; return; }
     if (this.box && (p.frames & 63) === 0) this.place();   // cheap safety net for layout changes we weren't told about
     if (!this.box || this.path !== 'webgl' || !this.engine) return;   // hidden, removed or switched to CSS meanwhile
+    this.lastDraw = now;
     const t0 = performance.now();
     try {
       this.engine.gpuTime(this.s.debug);
@@ -579,8 +576,9 @@ class OwlVideo {
     const ms = performance.now() - t0;
     if (!this.shown) { c.style.display = 'block'; this.shown = true; }
     p.frames++; p.cpu += ms; if (ms > p.cpuMax) p.cpuMax = ms;
-    if (meta && p.lastPresented >= 0 && meta.presentedFrames > p.lastPresented + 1) p.skipped += meta.presentedFrames - p.lastPresented - 1;
+    if (meta && p.lastPresented >= 0 && meta.presentedFrames > p.lastPresented + 1) p.skipped += meta.presentedFrames - p.lastPresented - 1 - (p.cappedSince || 0);
     if (meta) p.lastPresented = meta.presentedFrames;
+    p.cappedSince = 0;
     if (this.s.debug && performance.now() - p.since > 2000) this.report();
   }
 
@@ -594,6 +592,7 @@ class OwlVideo {
       cpuMaxMs: +p.cpuMax.toFixed(2),
       gpuMs: this.engine?.timer?.ms != null ? +this.engine.timer.ms.toFixed(2) : null,
       skipped: p.skipped,
+      capped: p.capped || 0,
       dropped: q && q0 ? q.droppedVideoFrames - q0.droppedVideoFrames : null,
       decoded: q && q0 ? q.totalVideoFrames - q0.totalVideoFrames : null,
       paused: this.v.paused,
@@ -601,7 +600,7 @@ class OwlVideo {
     this.lastLine = line;
     if (!this.v.paused) this.log('perf', line);
     this.hudUpdate();
-    Object.assign(p, { frames: 0, cpu: 0, cpuMax: 0, skipped: 0, since: now, q });
+    Object.assign(p, { frames: 0, cpu: 0, cpuMax: 0, skipped: 0, capped: 0, since: now, q });
   }
 
   hudUpdate(force) {
@@ -616,7 +615,7 @@ class OwlVideo {
     const l = this.lastLine || {}, why = this.path === 'css' ? ` (${this.reason})` : '';
     this.hud.textContent = `Midnight Owl · ${this.path}${why} · ${this.s.mode}\n` +
       `${this.v.videoWidth}x${this.v.videoHeight} → ${this.canvas?.width ?? '-'}x${this.canvas?.height ?? '-'} · ${this.v.playbackRate}×\n` +
-      (this.path === 'webgl' ? `${l.fps ?? '-'} fps · cpu ${l.cpuMs ?? '-'} ms (max ${l.cpuMaxMs ?? '-'})${l.gpuMs != null ? ` · gpu ${l.gpuMs} ms` : ''}\nskipped ${l.skipped ?? '-'} · dropped ${l.dropped ?? '-'}/${l.decoded ?? '-'}` : 'CSS filter path');
+      (this.path === 'webgl' ? `${l.fps ?? '-'} fps · cpu ${l.cpuMs ?? '-'} ms (max ${l.cpuMaxMs ?? '-'})${l.gpuMs != null ? ` · gpu ${l.gpuMs} ms` : ''}\nskipped ${l.skipped ?? '-'} · capped ${l.capped ?? '-'} · dropped ${l.dropped ?? '-'}/${l.decoded ?? '-'}` : 'CSS filter path');
     if (force) this.hudPlace();
   }
 

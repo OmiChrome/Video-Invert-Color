@@ -72,7 +72,7 @@ api.runtime.onMessage.addListener((msg, sender) => {
 api.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if ('debug' in changes) debug = !!changes.debug.newValue;
-  const keys = Object.keys(changes).filter(k => ['on', 'mode', 'warm', 'cap', 'debug'].includes(k));
+  const keys = Object.keys(changes).filter(k => ['on', 'mode', 'warm', 'cap', 'debug', 'smooth'].includes(k));
   if (keys.length) record({ kind: 'settings', ...Object.fromEntries(keys.map(k => [k, changes[k].newValue])) }, 'on' in changes);
   // Turned off: dim every tab, even ones whose ports we no longer know about after a background restart.
   if (changes.on && !changes.on.newValue) {
