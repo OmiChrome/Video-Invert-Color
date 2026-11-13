@@ -1,5 +1,7 @@
 # Night Lecture Mode: research and plan
 
+> **Status (round 3): built.** The extension is in `extension/` and is tested by `test/run.js`. Smart mode = algorithm D with grey-board normalisation and the colour-block fix. Keys: **O** on any page with a video, **Alt+O** as backup. The toolbar owl lights up while it is working.
+
 > **Update (round 2).** The lab in `research/` replaced the "adaptive global" recommendation below.
 > Live comparison: `research/lab/index.html`. Results and prior art: `research/README.md`.
 >

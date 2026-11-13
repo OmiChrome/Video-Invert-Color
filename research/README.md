@@ -4,13 +4,17 @@ Everything here is research. Nothing is the extension yet.
 
 | File | What it is |
 |---|---|
-| `lab/index.html` | **Night Lecture Lab**: all six algorithms running live on the test video as real browser filters. Serve the folder (`cd research/lab && python3 -m http.server`) and open it. |
-| `make_demo.py` | Generates `lab/demo.mp4`, a 34 s test lecture with 9 scenes (whiteboard, blackboard, slide + face inset, full-frame face, dark slide, grey slide, rapid cuts, fade-in, photo). |
-| `measure.js` | Playwright script. It plays each scene through each algorithm in Chromium, screenshots the result, and writes `lab/results.json` and `lab/comparison.jpg`. |
-| `lab/comparison.jpg` | Screenshot grid of every scene × every algorithm. |
-| `../docs/research/proto.py` | The first offline (NumPy) prototype from the planning round. |
+| `lab/index.html` | **Night Owl Lab**: original and processed side by side, same frame, every mode. Serve the folder (`cd research/lab && python3 -m http.server`) and open it. |
+| `lab/filters.js` | Copy of `extension/filters.js` (the real filters). |
+| `make_demo.py` | Generates `lab/demo.mp4`, a 41 s test lecture with 11 scenes. |
+| `sheet.js` | Renders `lab/comparison.jpg`: every scene through every mode, in Chromium. |
 
-Photos: NASA portrait of Eileen Collins (public domain) and a coffee photo, both from the scikit-image sample data set.
+> **Round 3 (current):** D became the extension's **Smart** mode, with both flaws fixed:
+>
+> - **Grey and unevenly lit boards** now go fully dark. One blur gives each spot a local board brightness, and the picture is divided by it before the flip (Zhang & He style normalisation, done with a premultiplied-alpha trick inside the SVG filter).
+> - **Diagram colour blocks** next to the board flip together with it, so there's no gradient.
+>
+> The round 2 tables below are kept for history. C and E were dropped: they flash on fast cuts.
 
 ## Algorithms tested
 

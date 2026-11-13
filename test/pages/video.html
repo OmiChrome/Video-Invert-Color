@@ -1,0 +1,9 @@
+<!doctype html><meta charset="utf-8"><title>video</title>
+<body style="margin:0;background:#000">
+<video id="v" src="demo.mp4" muted autoplay loop playsinline width="960" height="540"></video>
+<input id="box" placeholder="type here">
+<iframe id="fr" width="480" height="300" hidden></iframe>
+<script>
+  window.pageKeys = 0; addEventListener('keydown', e => { if (e.key === 'o') pageKeys++; });
+  const q = new URLSearchParams(location.search).get('frame'); if (q) { fr.hidden = false; fr.src = q; }
+</script>

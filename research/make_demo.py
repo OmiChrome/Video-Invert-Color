@@ -9,7 +9,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 W, H, FPS = 960, 540, 30
-HERE = Path(__file__).parent / "lab"
+HERE = Path(__file__).parent / "assets-src"
 BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 def font(n): return ImageFont.truetype(BOLD, n)
 FACE = Image.open(HERE / "astronaut.png").convert("RGB")
@@ -71,6 +71,25 @@ def photo(t):
 def rapid_cuts(t):
     return whiteboard(t) if int(t / 0.4) % 2 == 0 else Image.eval(full_cam(t), lambda v: int(v * 0.35))
 
+def uneven(t):
+    """Whiteboard filmed with a lamp on one side: grey, uneven corners."""
+    import numpy as np
+    im = np.asarray(whiteboard(t), dtype=np.float32) / 255
+    yy, xx = np.mgrid[0:H, 0:W]
+    light = 0.62 + 0.38 * np.exp(-(((xx - W * (0.35 + 0.05 * math.sin(t))) / (W * 0.6)) ** 2 + ((yy - H * 0.4) / (H * 0.7)) ** 2))
+    return Image.fromarray((im * light[..., None] * 255).astype("uint8"))
+
+TEACHER_MASK = None
+def teacher(t):
+    """Teacher standing in front of the board, moving a little."""
+    global TEACHER_MASK
+    from PIL import ImageFilter
+    if TEACHER_MASK is None:
+        m = Image.new("L", (380, 380), 0); d = ImageDraw.Draw(m)
+        d.ellipse((100, 10, 280, 230), fill=255); d.ellipse((40, 150, 340, 420), fill=255)
+        TEACHER_MASK = m.filter(ImageFilter.GaussianBlur(4))
+    im = whiteboard(t); im.paste(FACE.resize((380, 380)), (540 + int(40 * math.sin(t * 1.5)), 160), TEACHER_MASK); return im
+
 def fade_in(t):
     a = min(1.0, t / 3.0); return Image.blend(Image.new("RGB", (W, H), (0, 0, 0)), whiteboard(t), a)
 
@@ -84,6 +103,8 @@ SEGMENTS = [  # (label, seconds, frame-fn(local_t))
     ("7 rapid cuts white/dark", 4, rapid_cuts),
     ("8 fade black -> whiteboard", 4, fade_in),
     ("9 natural photo", 3, photo),
+    ("10 uneven lighting", 3, uneven),
+    ("11 teacher in front of board", 4, teacher),
 ]
 
 def main(out):
