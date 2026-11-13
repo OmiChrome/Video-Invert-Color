@@ -9,15 +9,46 @@ Everything here is research. Nothing is the extension yet.
 | `make_demo.py` | Generates `lab/demo.mp4`, a 41 s synthetic lecture with 11 scenes (`--no-labels` for the website GIFs). |
 | `sheet.js` | Renders `lab/comparison.jpg`: original · classic invert · v1.0 SVG filter · v1.1 engine. |
 | `bench.js` | Performance benchmark: extension off vs. CSS/SVG path vs. WebGL path on any video file. |
+| `pliny/` | 13 frames of a real 1080p Sam O'Nella video with their v1.2 renders and a comparison sheet. © Sam O'Nella Academy, used with permission for research only (see `pliny/README.md`). |
 
-## Round 4 (current): the WebGL engine (v1.1)
+## Round 5 (current): text first (v1.2)
+
+Feedback on v1.1: coloured letters came out half flipped (hatched), which made them hard to read. v1.2 puts text
+first and was tuned on the frames in `pliny/` and the synthetic demo, crop by crop at native resolution.
+
+- **Every mark on paper flips as a whole**: black and coloured text, pen, lines, outlines. Nothing decides
+  per letter stroke any more, so a letter can't be cut in half. WCAG contrast of text after processing: captions
+  12.1:1, a bold title 11.9:1, speech-bubble text 11.9:1 (was 9.2:1), whiteboard marker 11.9:1 (was 8.7:1).
+- **Big solids stay**: grey boxes and panels from 40 px (5×5 grid cells at 1080p), coloured fills from 56 px
+  (7×7). Huge bold coloured titles, whose gaps can be thinner than a cell, and medium fills like hair flip whole
+  instead of being cut along the grid.
+- **Clean solid edges**: at a solid's edge the paper is "unmixed" from each anti-aliased pixel, so the edge goes
+  straight from the kept solid to the dark paper: no light outline, no grey halo. A mark of its own next to a
+  solid (an outline, an eye, a mouth) still flips.
+- **Icons keep their glyphs**: small pockets walled in by a solid (white "??" in a red disc, book pages) belong to
+  it, filled whole or not at all.
+- **Illustrated scenes**: only the pure-white panels themselves flip (a closing of the white map follows the
+  panel's edge), up to the end of long speech bubbles and caption bars. Skies, glows behind titles and white faces
+  stay; the v1.1 smudge under caption bars is gone.
+- **Drawings on paper**: frames that are nearly all paper flip everywhere, also inside big figures.
+
+Cost: the grid morphology is separable (row + column passes). In headless Chromium with software rendering (only
+relative numbers mean anything), 1080p at 2.5× in a 1280×720 player runs at 12 page fps against 18 for v1.1; the
+extra work is a dozen passes over the 240×135 grid, which a real GPU does in well under a millisecond. The 30 fps
+processing cap is unchanged.
+
+Known limits:
+- A small photo inset on a white slide: a light-grey backdrop inside the photo can partly darken, in patches.
+- A light "spotlight" behind a cut-out figure on a whiteboard can break up.
+- Tiny specks (2-3 px) can appear where an icon's white glyph touches the edge of its box.
+
+## Round 4: the WebGL engine (v1.1)
 
 The SVG filter of v1.0 ran ~25 full-screen filter steps per frame, and users saw lag above 2×. v1.1 draws each frame
 with WebGL2 into a canvas laid exactly over the video. Every decision is made on a 240×135 grid; the full-size pass
 reads only the frame and one decision value per pixel. Details are in the header of `extension/engine.js`.
 
-What changed in the picture, tuned on 12 frames of a real 1080p Sam O'Nella video (not committed, it is copyrighted)
-plus the synthetic demo:
+What changed in the picture, tuned on 12 frames of a real 1080p Sam O'Nella video plus the synthetic demo:
 
 - Only **paper** (colourless: a tint under ~0.03, and not dark) and the **lines drawn on it** flip. A line is ink with
   paper on both sides, horizontally or vertically, at 16 or 32 px.
