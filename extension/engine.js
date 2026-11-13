@@ -443,7 +443,9 @@ class OwlVideo {
     if (!c || this.path !== 'webgl') return;
     const cs = getComputedStyle(v);
     const w = v.clientWidth, h = v.clientHeight, vw = v.videoWidth, vh = v.videoHeight;
-    if (!w || !h || !vw || !vh || cs.display === 'none' || cs.visibility === 'hidden') { c.style.display = 'none'; this.shown = false; return; }
+    if (!w || !h || !vw || !vh || cs.display === 'none' || cs.visibility === 'hidden') {   // hidden: no canvas until it shows again
+      c.style.display = 'none'; this.shown = false; this.box = ''; return;
+    }
     let x = 0, y = 0, cw = w, ch = h, rect = [0, 0, 1, 1];
     const ar = vw / vh, box = w / h;
     if (cs.objectFit === 'cover') {
@@ -512,9 +514,9 @@ class OwlVideo {
     const v = this.v, c = this.canvas;
     if (v.readyState < 2 || !v.videoWidth) return;
     if (!this.box) this.place();
-    if (!this.box) return;
     const p = this.perf;
-    if ((p.frames & 63) === 0) this.place();   // cheap safety net for layout changes we weren't told about
+    if (this.box && (p.frames & 63) === 0) this.place();   // cheap safety net for layout changes we weren't told about
+    if (!this.box || this.path !== 'webgl' || !this.engine) return;   // hidden, removed or switched to CSS meanwhile
     const t0 = performance.now();
     try {
       this.engine.gpuTime(this.s.debug);

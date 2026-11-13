@@ -72,6 +72,14 @@ const seek = (page, t) => page.evaluate(async t => {
   await page.waitForTimeout(800);
   check('owl stays lit after in-page URL changes (YouTube-style)', await iconOn(page));
 
+  await page.evaluate(() => { const v = document.querySelector('video'); v.style.display = 'none'; v.play(); });
+  await page.waitForTimeout(700);
+  check('hidden video: no canvas left on screen', await page.evaluate(() => getComputedStyle(document.querySelector('.owl-canvas')).display === 'none'));
+  await page.evaluate(() => { document.querySelector('video').style.display = ''; });
+  await page.waitForTimeout(700);
+  check('video shown again: canvas back on the picture', (await pathOf(page)) === 'webgl');
+  await page.evaluate(() => document.querySelector('video').pause());
+
   await page.locator('#box').click(); await page.keyboard.type('hello owl');
   check('typing o in a text box does not toggle', (await pathOf(page)) === 'webgl' && (await page.inputValue('#box')) === 'hello owl');
 
@@ -118,6 +126,13 @@ const seek = (page, t) => page.evaluate(async t => {
   const frame = p4.frames().find(f => f.url().includes('127.0.0.1'));
   check('works inside a cross-origin iframe (embedded player)', !!frame && (await pathOf(frame)) === 'webgl');
   check('owl bright for embedded video', await iconOn(p4));
+
+  const p6 = await ctx.newPage(); await p6.goto(url); await p6.waitForFunction(() => document.querySelector('video').readyState >= 2);
+  await p6.waitForTimeout(600);
+  await p6.evaluate(() => { const v = document.querySelector('video'); v.play(); setTimeout(() => v.remove(), 200); });
+  await p6.waitForTimeout(1500);
+  check('removed video: its canvas is cleaned up', await p6.evaluate(() => !document.querySelector('.owl-canvas')));
+  await p6.close();
 
   const p5 = await ctx.newPage(); await p5.goto('http://localhost:8770/xvideo.html');
   await p5.waitForFunction(() => document.querySelector('video').readyState >= 2); await p5.waitForTimeout(1200);
