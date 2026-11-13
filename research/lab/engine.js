@@ -1,18 +1,20 @@
 // Midnight Owl engine: draws each video frame through a small WebGL2 pipeline into a canvas laid over the video.
 //
-// Text first: anything darker than the paper flips to light (text, pen, lines, outlines), unless it belongs to a
-// big solid shape (box, bar, pie, hair, photo), and the paper flips to near-black. All decisions are made on a tiny
-// 240×135 grid (≈8 px cells at 1080p), so the full-size pass is two texture reads and a little arithmetic per
-// pixel, light enough for an old integrated GPU.
+// Text first: paper flips to near-black and everything drawn on it (text, pen, lines, outlines, coloured marks)
+// flips to light, whole, so letters are never cut in half. Big solid shapes (boxes, bars, pies, big fills, photos)
+// stay as they are, with their edges cleanly separated from the paper. All analysis runs on a tiny 240×135 grid
+// (≈8 px cells at 1080p); the full-size pass reads the frame and one decision texel per pixel, plus a few
+// neighbours only along edges, light enough for an old integrated GPU.
 //
-//   1 stats    per cell: paper share (bright, colourless), paper brightness, pure-white share
-//              + mipmaps = free large-scale averages
-//   2 board    may this area flip? paper scenes vs. illustrated scenes, grown one block to reach paper edges;
-//              also the local paper brightness, so grey and unevenly lit boards go fully dark
-//   3-4 open   "big solid" map: shrink the non-paper areas by 3 cells, grow them back. Text strokes, pen lines and
-//              small marks vanish; boxes, bars, pies, hair and photos come back at their exact size
-//   5 decide   per cell: board · paper level · big solid
-//   6 picture  per pixel: flip paper and ink, keep big solids, soft highlight roll-off for everything kept
+//   1      stats    per cell: paper share (bright, colourless), paper brightness, pure-white share, black-ink share
+//                   + mipmaps = free large-scale averages
+//   2-5    morph    separable shrink/grow of "not paper" (5×5 and 7×7 cells) and a closing of the pure-white map
+//   6      board    may this area flip? Paper scenes vs. illustrated scenes (only their white panels), and the local
+//                   paper brightness, so grey and unevenly lit boards go fully dark
+//   7-10   solids   big colourless solids from 5×5 cells, coloured ones from 7×7; grown through touching fill
+//   11     decide   per cell: board · paper level · inside a solid (with small walled-in pockets) · next to one
+//   12     picture  per pixel: flip paper and marks, keep solids, separate solid edges from paper, roll off
+//                   highlights of everything kept
 //
 // Everything is decided from the frame being shown, so cuts never flash, at any playback speed.
 'use strict';
@@ -31,6 +33,7 @@ in vec2 vUv;
 uniform sampler2D uSrc;
 uniform vec4 uSrcRect;   // visible part of the source: x, y, w, h in texture coords
 uniform vec2 uCell;      // one stats cell in uv
+uniform vec2 uTexel;     // one source pixel in uv (picture pass)
 out vec4 o;
 const vec3 W = vec3(0.2126, 0.7152, 0.0722);
 vec3 src(vec2 uv) { return texture(uSrc, uSrcRect.xy + vec2(uv.x, 1.0 - uv.y) * uSrcRect.zw).rgb; }
@@ -46,67 +49,138 @@ float paperness(vec3 c, float y) { return neutral(c) * smoothstep(0.45, 0.6, y);
 // Pass 1 (small grid): 16 samples per cell, at texel corners so each one averages 2×2 pixels (all 64 at 1080p).
 const OWL_STATS_FS = OWL_COMMON + `
 void main() {
-  float P = 0.0, PY = 0.0, WHITE = 0.0, DARK = 0.0;
+  float P = 0.0, PY = 0.0, WHITE = 0.0, INK = 0.0;
   for (int j = 0; j < 4; j++) for (int i = 0; i < 4; i++) {
     vec3 c = src0(vUv + (vec2(float(i), float(j)) - 1.5) * 0.25 * uCell);
     float y = dot(c, W), p = paperness(c, y);
-    P += p; PY += p * y; WHITE += neutral(c) * smoothstep(0.88, 0.95, y); DARK += 1.0 - smoothstep(0.35, 0.5, y);
+    P += p; PY += p * y; WHITE += neutral(c) * smoothstep(0.88, 0.95, y); INK += neutral(c) * (1.0 - smoothstep(0.2, 0.35, y));
   }
-  // R: paper share · G: paper-weighted brightness · B: pure-white share · A: dark-ink share
-  o = vec4(P, PY, WHITE, DARK) * 0.0625;
+  // R: paper share · G: paper-weighted brightness · B: pure-white share · A: black/grey ink share
+  o = vec4(P, PY, WHITE, INK) * 0.0625;
 }`;
 
-// Pass 2 (small grid): where may we flip? One value per cell, grown by one block so a qualifying paper area flips
-// right up to its edges. Also the local paper brightness used to normalise grey or unevenly lit boards.
+// Pass 6 (small grid): where may we flip? Also the local paper brightness used to normalise grey or unevenly lit
+// boards.
+//   Paper scenes (whiteboards, slides, plain drawings): wherever there is enough paper around, over a large area,
+//   grown by one block so a qualifying area flips right up to its edges.
+//   Illustrated scenes, photos, maps: only big areas of pure white (caption panels, speech bubbles), never
+//   light-grey skies, columns, glows or white faces inside the picture; and only the pure-white cells themselves,
+//   closed over the text inside them, so the flip stops exactly at the panel's edge.
 const OWL_BOARD_FS = OWL_COMMON + `
-uniform sampler2D uStats;
-float boardAt(vec2 uv, float g) {
+uniform sampler2D uStats, uWhite;
+vec2 parts(vec2 uv) {
   vec4 L = textureLod(uStats, uv, 4.0);   // ≈128 px blocks at 1080p
   vec4 X = textureLod(uStats, uv, 5.0);   // ≈256 px blocks
-  // Paper scenes (whiteboards, slides, plain drawings): enough paper around, over a large area.
-  float paperScene = smoothstep(0.3, 0.55, L.r) * smoothstep(0.2, 0.45, X.r);
-  // Illustrated scenes, photos, maps: only big areas of pure white (caption panels, slides) qualify,
-  // never light-grey skies, columns, glows or white faces inside the picture.
-  float pictureScene = smoothstep(0.25, 0.45, L.b) * smoothstep(0.2, 0.35, X.b);
-  return mix(pictureScene, paperScene, g) * smoothstep(0.42, 0.52, L.g / max(L.r, 1e-3));
+  float picture = smoothstep(0.4, 0.6, L.b) * smoothstep(0.3, 0.45, X.b);
+  float paper = smoothstep(0.3, 0.55, L.r) * smoothstep(0.2, 0.45, X.r);
+  return vec2(picture, paper) * smoothstep(0.42, 0.52, L.g / max(L.r, 1e-3));
 }
 void main() {
   // Whole-frame paper share: paper scenes are ~75-97 % paper, illustrated ones well under 50 %.
-  float g = smoothstep(0.5, 0.7, textureLod(uStats, vec2(0.5), 12.0).r);
-  float b = boardAt(vUv, g);
+  float share = textureLod(uStats, vec2(0.5), 12.0).r, g = smoothstep(0.5, 0.7, share);
+  vec2 m = parts(vUv);
   vec2 d = uCell * 8.0;
   for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++)
-    if (i != 0 || j != 0) b = max(b, boardAt(vUv + vec2(float(i), float(j)) * d, g));
+    if (i != 0 || j != 0) m = max(m, parts(vUv + vec2(float(i), float(j)) * d));
+  // A long white run (a speech bubble or caption bar that stays white for 64, 128 and 256 px in some direction) is
+  // a panel too, up to its very end, where the block averages above fall off. A face or a glow behind a title is
+  // not that long.
+  float run = 0.0;
+  for (int k = 0; k < 4; k++) {
+    vec2 dir = vec2(k == 0 ? 1.0 : k == 1 ? -1.0 : 0.0, k == 2 ? 1.0 : k == 3 ? -1.0 : 0.0) * uCell * 8.0;   // 64 px
+    run = max(run, min(min(textureLod(uStats, vUv + dir, 3.0).b, textureLod(uStats, vUv + dir * 2.0, 3.0).b),
+                       textureLod(uStats, vUv + dir * 4.0, 3.0).b));
+  }
+  vec4 Lc = textureLod(uStats, vUv, 4.0);
+  m.x = max(m.x * smoothstep(0.4, 0.6, Lc.b), smoothstep(0.42, 0.55, run) * smoothstep(0.42, 0.52, Lc.g / max(Lc.r, 1e-3)));
+  float white = texture(uWhite, vUv).b;   // the pure-white share, closed over 5×5 cells (passes 2-5)
+  float b = mix(m.x * smoothstep(0.3, 0.6, white), m.y, g);
+  // A frame that is nearly all paper (a drawing, a whiteboard) is a board everywhere, also inside big figures;
+  // the big-solid map keeps their fills as they are.
+  b = max(b, smoothstep(0.8, 0.88, share));
   vec4 L3 = textureLod(uStats, vUv, 3.0), L4 = textureLod(uStats, vUv, 4.0);
   float level = mix(L4.g / max(L4.r, 1e-3), L3.g / max(L3.r, 1e-3), smoothstep(0.3, 0.6, L3.r));
-  o = vec4(b, clamp(level, 0.0, 1.0), textureLod(uStats, vUv, 0.0).a, 1.0);   // B: dark-ink share of this cell
+  o = vec4(b, clamp(level, 0.0, 1.0), 0.0, 1.0);
 }`;
 
-// Passes 3-4 (small grid): opening of the "not paper" map. Shrink (min over 7×7 cells), then grow (max over 7×7).
-// Anything thinner than ~7 cells (56 px at 1080p: letters, bold titles, pen strokes, outlines, small marks) is gone
-// afterwards; boxes, bars, pies, hair and photos come back with their exact outline.
-const OWL_OPEN_FS = OWL_COMMON + `
-uniform sampler2D uIn;
-uniform int uGrow;   // 0: shrink, reading 1 - paper share from the stats (.r); 1: grow, reading .r
+// Passes 2-5 and 7-10 (small grid): the "big solid" map, i.e. what stays as it is. Each min/max is separable, run as a row
+// pass and then a column pass (7 reads each), which keeps the grid cheap for small GPUs.
+//   shrink   min over 5×5 (R) and over 7×7 cells (G) of "not paper": letters, bold titles, pen strokes, outlines
+//            and small marks vanish
+//   grow     max back over the same size: boxes, bars, pies, big fills and photos come back at their exact size
+//            (B along the way: the pure-white share, grown and then shrunk by two cells, i.e. closed over the text
+//            inside white panels; the board pass uses it)
+//   combine  colourless solids (grey boxes, panels, icon backgrounds) count from 5×5 cells (40 px at 1080p),
+//            coloured ones from 7×7 (56 px), so huge bold coloured titles, whose gaps can be thinner than a cell,
+//            and medium fills like hair flip whole instead of being cut along the grid
+//   rebuild  ×3: a solid also takes in neighbouring cells of coloured fill that touch it along a front (3+ solid
+//            neighbours): thinner parts of a fill, white text on a coloured banner. Black ink never joins
+//            (a mouth or an eye next to the hair), and neither does a thin line leading away (an arm, an arrow).
+const OWL_MORPH_FS = OWL_COMMON + `
+uniform sampler2D uIn, uStats;
+uniform int uOp;     // 0 shrink from the stats · 1 shrink · 2 grow · 3 combine · 4 rebuild
+uniform vec2 uDir;   // (1,0) along rows, (0,1) along columns
+vec4 at(vec2 d) { return texture(uIn, vUv + d * uCell); }
 void main() {
-  float v = uGrow == 1 ? 0.0 : 1.0;
-  for (int j = -3; j <= 3; j++) for (int i = -3; i <= 3; i++) {
-    float x = texture(uIn, vUv + vec2(float(i), float(j)) * uCell).r;
-    v = uGrow == 1 ? max(v, x) : min(v, 1.0 - x);
+  vec4 v;
+  if (uOp <= 2) {
+    bool grow = uOp == 2;
+    v = grow ? vec4(0.0, 0.0, 1.0, 1.0) : vec4(1.0, 1.0, 0.0, 1.0);
+    for (int k = -3; k <= 3; k++) {
+      vec2 d = uDir * float(k);
+      vec4 x = uOp == 0 ? texture(uStats, vUv + d * uCell) : at(d);
+      if (uOp == 0) x = vec4(1.0 - x.r, 1.0 - x.r, x.b, 1.0);
+      bool in5 = abs(k) <= 2;
+      if (grow) { if (in5) { v.r = max(v.r, x.r); v.b = min(v.b, x.b); } v.g = max(v.g, x.g); }
+      else      { if (in5) { v.r = min(v.r, x.r); v.b = max(v.b, x.b); } v.g = min(v.g, x.g); }
+    }
+  } else if (uOp == 3) {
+    vec4 x = at(vec2(0.0)), st = textureLod(uStats, vUv, 2.0);
+    float colourless = smoothstep(0.5, 0.7, st.a / max(1.0 - st.r, 0.05));
+    v = vec4(max(smoothstep(0.8, 0.95, x.g), smoothstep(0.8, 0.95, x.r) * colourless), 0.0, 0.0, 1.0);
+  } else {
+    float sum = 0.0;
+    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) if (i != 0 || j != 0) sum += at(vec2(float(i), float(j))).r;
+    vec4 st = textureLod(uStats, vUv, 0.0);
+    float coloured = smoothstep(0.5, 0.65, 1.0 - st.r - st.a);   // mostly coloured or mid-tone: not paper, not black ink
+    v = vec4(max(at(vec2(0.0)).r, coloured * smoothstep(2.0, 3.0, sum)), 0.0, 0.0, 1.0);
   }
-  o = vec4(v, 0.0, 0.0, 1.0);
+  o = v;
 }`;
 
-// Pass 5 (small grid): the per-cell values the picture pass needs, in one texture.
+// Pass 11 (small grid): the per-cell values the picture pass needs, in one texture.
+// A small pocket walled in by a solid on all four sides (white glyphs in an icon, a highlight) belongs to it:
+// at most 11 cells (≈90 px at 1080p) across and down, and not mostly paper. Bigger or mostly white pockets (speech
+// bubbles, labels, a face framed by hair) and pockets open on one side are not.
 const OWL_DECIDE_FS = OWL_COMMON + `
-uniform sampler2D uBoard, uIn;
+uniform sampler2D uBoard, uIn, uStats;
+float at(int i, int j) { return texture(uIn, vUv + vec2(float(i), float(j)) * uCell).r; }
 void main() {
+  float s = at(0, 0), near = 0.0;
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) near = max(near, at(i, j));
+  // Distance to the solid in each direction, up to 12 cells (99 = none). Every cell of a pocket sees both of
+  // its walls, so a pocket is filled whole or not at all.
+  // (Each read sits between two cells, so it sees a wall in either of them; distances are good to half a cell.)
+  float l = 99.0, r = 99.0, u = 99.0, d = 99.0, inside = s;
+  if (s < 0.5) {
+    for (int k = 1; k <= 11; k += 2) {
+      float f = float(k) + 0.5;
+      vec2 sx = vec2(f * uCell.x, 0.0), sy = vec2(0.0, f * uCell.y);
+      if (l > 98.0 && texture(uIn, vUv - sx).r > 0.4) l = f;
+      if (r > 98.0 && texture(uIn, vUv + sx).r > 0.4) r = f;
+      if (u > 98.0 && texture(uIn, vUv - sy).r > 0.4) u = f;
+      if (d > 98.0 && texture(uIn, vUv + sy).r > 0.4) d = f;
+      // no wall within 6.5 cells on either side of an axis: too wide to be a pocket (most of a page stops here)
+      if (k >= 5 && ((l > 98.0 && r > 98.0) || (u > 98.0 && d > 98.0))) break;
+    }
+    inside = step(l + r, 13.0) * step(u + d, 13.0);
+  }
   vec4 B = texture(uBoard, vUv);
-  // R board · G paper brightness · B big solid shape here (keep it as it is)
-  o = vec4(B.r, B.g, smoothstep(0.8, 0.95, texture(uIn, vUv).r), 1.0);
+  // R board · G paper brightness · B inside a big solid · A a big solid within one cell
+  o = vec4(B.r, B.g, inside, max(inside, near));
 }`;
 
-// Pass 6 (screen size): the picture.
+// Pass 12 (screen size): the picture.
 const OWL_MAIN_FS = OWL_COMMON + `
 uniform sampler2D uDecide;
 uniform vec2 uPx;        // one output pixel in uv
@@ -131,6 +205,21 @@ vec3 flip(vec3 c, float y, float level, bool crisp) {
   float yt = DARK + (uCap - DARK) * (crisp ? clamp((t - 0.06) / 0.54, 0.0, 1.0) : t);
   return clamp(cn + (yt - yn), 0.0, 1.0);
 }
+float paperAt(vec2 uv, float level) {
+  vec3 c = src(uv);
+  return smoothstep(0.7, 0.85, dot(c, W) / level) * (1.0 - smoothstep(0.08, 0.15, chroma(c)));
+}
+// Looks k cell-steps along one direction: x = paper seen, y = paper or something clearly lighter than y0 seen.
+vec2 look(vec2 step, int k, float level, float y0) {
+  vec2 r = vec2(0.0);
+  for (int i = 1; i <= 4; i++) {
+    if (i > k) break;
+    vec3 c = src(vUv + step * float(i));
+    float l = dot(c, W), pa = smoothstep(0.7, 0.85, l / level) * (1.0 - smoothstep(0.08, 0.15, chroma(c)));
+    r = max(r, vec2(pa, max(pa, smoothstep(0.12, 0.22, l - y0))));
+  }
+  return r;
+}
 
 void main() {
   vec3 c = src(vUv);
@@ -143,21 +232,79 @@ void main() {
   } else {
     vec4 D = texture(uDecide, vUv);
     float level = max(D.g, 0.45), yn = y / level;
-    // Inside a board, outside big solid shapes, flip:
-    //   · everything colourless: paper, grey edges, black and grey ink
-    //   · anything darker than the paper: coloured pen and text
-    //   · light colours right next to a much darker pixel: the anti-aliased edges of coloured letters
-    // Light colours away from ink (a yellow highlighter, a light fill) stay as they are, so they stay readable.
-    float room = D.r * (1.0 - D.b);
-    float g = max(neutral(c), 1.0 - smoothstep(0.55, 0.75, yn));
-    if (room > 0.01 && g < 0.99) {
+    // which way is into the nearest big solid (screen-space slope of the solid map; free, and outside branches)
+    vec2 slope = vec2(dFdx(D.b + D.a), dFdy(D.b + D.a));
+    // Three zones inside a board: well inside a big solid (keep it), its rim (about one cell around it), and
+    // everywhere else.
+    float wIn = smoothstep(0.6, 0.95, D.b);
+    float wRim = (1.0 - wIn) * smoothstep(0.1, 0.4, D.a);
+    float wFree = 1.0 - wIn - wRim;
+    // Pale = colourless (paper, grey, black ink), or bright with a slight tint: video stores colour at half
+    // resolution, so white pixels next to coloured letters pick up their tint.
+    float paperish = smoothstep(0.75, 0.85, yn) * (1.0 - smoothstep(0.08, 0.15, chroma(c)));
+    float pale = max(neutral(c), paperish);
+    float fFree = pale, fRim = 0.0, a = 0.0;   // how much flips (everywhere else / rim); a: paper share at the rim
+    vec3 P = vec3(level);                      // the paper's colour next to this pixel
+    if (D.r > 0.01 && wIn < 0.99 && (pale < 0.99 || wRim > 0.01)) {
+      // The darkest of the four neighbours (s), the paper next to this pixel (a paper-like neighbour, else the
+      // local paper level), and how far this pixel lies on the line from s to that paper.
       vec2 dx = vec2(uPx.x * 1.5, 0.0), dy = vec2(0.0, uPx.y * 1.5);
-      float n = min(min(dot(src(vUv + dx), W), dot(src(vUv - dx), W)), min(dot(src(vUv + dy), W), dot(src(vUv - dy), W)));
-      g = max(g, 1.0 - smoothstep(0.45, 0.65, n / level));
+      vec3 s = c, b = c, n0 = src(vUv + dx), n1 = src(vUv - dx), n2 = src(vUv + dy), n3 = src(vUv - dy);
+      float n = y, m = y, l0 = dot(n0, W), l1 = dot(n1, W), l2 = dot(n2, W), l3 = dot(n3, W);
+      if (l0 < n) { n = l0; s = n0; } if (l0 > m) { m = l0; b = n0; }
+      if (l1 < n) { n = l1; s = n1; } if (l1 > m) { m = l1; b = n1; }
+      if (l2 < n) { n = l2; s = n2; } if (l2 > m) { m = l2; b = n2; }
+      if (l3 < n) { n = l3; s = n3; } if (l3 > m) { m = l3; b = n3; }
+      float bPale = smoothstep(0.7, 0.85, m / level) * (1.0 - smoothstep(0.08, 0.15, chroma(b)));
+      P = max(mix(vec3(level), b, bPale), c * pale);
+      vec3 sp = P - s;
+      float t = clamp(dot(c - s, sp) / max(dot(sp, sp), 1e-4), 0.0, 1.0);
+      float mixed = 1.0 - smoothstep(0.06, 0.15, length(c - s - t * sp));   // c really is s blended with paper
+      vec2 st = max(uCell * 0.62, uTexel * 3.0), h = vec2(st.x, 0.0), v = vec2(0.0, st.y);
+      if (pale > 0.5) {
+        // Colourless: everywhere else it flips (paper, ink). At the rim, paper and anti-aliased paper/solid
+        // blends go dark with the paper, the solid's own edge stays, and a grey or black mark of its own (an
+        // outline, an eye, a mouth: paper on one side within 2.5 cells, paper or something lighter on the
+        // other) flips whole.
+        float plain = pale * smoothstep(0.75, 0.9, yn);
+        a = max(t * mixed, plain);
+        if (wRim > 0.01 && plain < 0.99) {
+          vec2 L = look(-h, 4, level, y), R = look(h, 4, level, y), U = look(-v, 4, level, y), Dn = look(v, 4, level, y);
+          fRim = max(max(L.x * R.y, R.x * L.y), max(U.x * Dn.y, Dn.x * U.y));
+          // ...but not if it has the solid's own colour (a strip of a grey box between a white glyph and the paper)
+          if (dot(slope, slope) > 1e-8) {
+            vec2 iuv = vUv + normalize(slope) * uCell * 2.5;
+            vec3 inner = src(iuv);
+            float same = 1.0 - smoothstep(0.06, 0.15, abs(dot(inner, W) - y) + abs(chroma(inner) - chroma(c)));
+            fRim *= 1.0 - same * smoothstep(0.6, 0.9, texture(uDecide, iuv).b);
+          }
+        }
+      } else if (yn > 0.75) {
+        // Light colour: stays, except the anti-aliased edge of a darker mark (a blend of the mark and paper).
+        fFree = (1.0 - smoothstep(0.45, 0.65, n / level)) * mixed;
+        a = t * mixed;
+      } else {
+        // Coloured mark (pen, letters, also smaller fills): flips, whole. At the rim of a big solid it has to prove
+        // it is a mark of its own, thin, with paper on one side and paper or something lighter on the other within
+        // two cells; the solid's own colour fails that test and stays.
+        fFree = 1.0;
+        if (wRim > 0.01) {
+          vec2 L = look(-h, 3, level, y), R = look(h, 3, level, y), U = look(-v, 3, level, y), Dn = look(v, 3, level, y);
+          fRim = max(max(L.x * R.y, R.x * L.y), max(U.x * Dn.y, Dn.x * U.y));
+        }
+      }
     }
-    float f = room * g;
-    outc = mix(keep(c, y), flip(c, y, level, true), f);
-    if (uMode == 3) outc = mix(vec3(y) * 0.35, vec3(D.r, f, D.b), 0.8);   // red board · green flipped · blue big solid
+    vec3 kept = keep(c, y), flipped = flip(c, y, level, true);
+    vec3 rim = max(c - a * (P - DARK), 0.0);
+    rim = mix(keep(rim, dot(rim, W)), flipped, fRim);
+    vec3 v = wIn * kept + wRim * rim + wFree * mix(kept, flipped, fFree);
+    // Board edges: pure white (a panel's paper) and ink flip fully as soon as the board is fairly sure, so panels
+    // go dark right up to their edge; light but not white (a sky, a pale wall next to a panel) only where it is
+    // certain, so nothing smudges past the panel.
+    float pure = neutral(c) * smoothstep(0.88, 0.95, y), lightish = pale * smoothstep(0.6, 0.8, yn) * (1.0 - pure);
+    float bw = mix(smoothstep(0.3, 0.6, D.r), smoothstep(0.5, 0.9, D.r), lightish);
+    outc = mix(kept, v, bw);
+    if (uMode == 3) outc = mix(vec3(y) * 0.35, vec3(D.r, D.r * (wFree * fFree + wRim * max(fRim, a)), wIn + 0.5 * wRim), 0.8);   // red board · green flipped · blue solid (rim half)
   }
   o = vec4(outc * uTint, 1.0);
 }`;
@@ -181,18 +328,18 @@ function owlPrograms(gl, defs) {
 }
 
 // The GPU part. Usable with any image source: <video>, <img>, <canvas>, ImageBitmap.
-// Texture units: 0 = video frame, 1 = stats (mipmapped), 2 = board, 3 = opening scratch, 4 = big solids, 5 = decisions.
+// Texture units: 0 = video frame, 1 = stats (mipmapped), 2 = board, 3-4 = big-solid ping-pong, 5 = decisions.
 class OwlGL {
   constructor(canvas) {
     const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, preserveDrawingBuffer: false, powerPreference: 'low-power' });
     if (!gl) throw Object.assign(new Error('WebGL2 is not available'), { name: 'NoWebGL2' });
     this.gl = gl;
-    [this.stats, this.board, this.open, this.decide, this.main] = owlPrograms(gl, [
+    [this.stats, this.board, this.morph, this.decide, this.main] = owlPrograms(gl, [
       [OWL_STATS_FS, ['uSrc', 'uSrcRect', 'uCell']],
-      [OWL_BOARD_FS, ['uStats', 'uCell']],
-      [OWL_OPEN_FS, ['uIn', 'uCell', 'uGrow']],
-      [OWL_DECIDE_FS, ['uBoard', 'uIn', 'uCell']],
-      [OWL_MAIN_FS, ['uSrc', 'uSrcRect', 'uDecide', 'uPx', 'uMode', 'uCap', 'uTint']],
+      [OWL_BOARD_FS, ['uStats', 'uWhite', 'uCell']],
+      [OWL_MORPH_FS, ['uIn', 'uStats', 'uCell', 'uOp', 'uDir']],
+      [OWL_DECIDE_FS, ['uBoard', 'uIn', 'uStats', 'uCell']],
+      [OWL_MAIN_FS, ['uSrc', 'uSrcRect', 'uDecide', 'uPx', 'uCell', 'uTexel', 'uMode', 'uCap', 'uTint']],
     ]);
     this.vao = gl.createVertexArray();
     this.fbo = { stats: gl.createFramebuffer(), board: gl.createFramebuffer(), open: [gl.createFramebuffer(), gl.createFramebuffer()], decide: gl.createFramebuffer() };
@@ -291,25 +438,31 @@ class OwlGL {
       gl.uniform1i(this.stats.u.uSrc, 0); gl.uniform4fv(this.stats.u.uSrcRect, rect);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       bind(1, T.stats); gl.generateMipmap(gl.TEXTURE_2D);
-      // 2 board
+      // 2-5 separable shrink and grow (rows, then columns), ping-ponging between open[0] and open[1]
+      const M = this.morph, step = (op, dir, from, to) => {
+        if (from !== null) bind(3 + from, T.open[from]);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo.open[to]);
+        gl.uniform1i(M.u.uIn, from === null ? 1 : 3 + from);   // never the texture being drawn into
+        gl.uniform1i(M.u.uOp, op); gl.uniform2fv(M.u.uDir, dir);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      };
+      pass(M, this.fbo.open[0]);
+      gl.uniform1i(M.u.uStats, 1);
+      step(0, [1, 0], null, 0); step(1, [0, 1], 0, 1); step(2, [1, 0], 1, 0); step(2, [0, 1], 0, 1);
+      // 6 board (reads the closed white map in open[1].b)
       pass(this.board, this.fbo.board);
-      gl.uniform1i(this.board.u.uStats, 1);
+      gl.uniform1i(this.board.u.uStats, 1); gl.uniform1i(this.board.u.uWhite, 4);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
-      // 3-4 opening: shrink stats → open[0], grow open[0] → open[1]
-      pass(this.open, this.fbo.open[0]);
-      gl.uniform1i(this.open.u.uIn, 1); gl.uniform1i(this.open.u.uGrow, 0);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-      bind(3, T.open[0]);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo.open[1]);
-      gl.uniform1i(this.open.u.uIn, 3); gl.uniform1i(this.open.u.uGrow, 1);
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
-      // 5 decide
+      // 7-10 combine, rebuild ×3
+      gl.useProgram(M.p);
+      step(3, [0, 0], 1, 0); step(4, [0, 0], 0, 1); step(4, [0, 0], 1, 0); step(4, [0, 0], 0, 1);
+      // 11 decide
       bind(2, T.board); bind(4, T.open[1]);
       pass(this.decide, this.fbo.decide);
-      gl.uniform1i(this.decide.u.uBoard, 2); gl.uniform1i(this.decide.u.uIn, 4);
+      gl.uniform1i(this.decide.u.uBoard, 2); gl.uniform1i(this.decide.u.uIn, 4); gl.uniform1i(this.decide.u.uStats, 1);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
-    // 6 the picture
+    // 12 the picture
     bind(5, T.decide);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, canvas.width, canvas.height);
@@ -319,6 +472,8 @@ class OwlGL {
     gl.uniform4fv(m.u.uSrcRect, rect);
     gl.uniform2f(m.u.uPx, 1 / canvas.width, 1 / canvas.height);
     gl.uniform1i(m.u.uMode, this.mode); gl.uniform1f(m.u.uCap, this.cap); gl.uniform3fv(m.u.uTint, this.tint);
+    gl.uniform2f(m.u.uCell, 1 / this.gw, 1 / this.gh);
+    gl.uniform2f(m.u.uTexel, 1 / Math.max(1, sw * rect[2]), 1 / Math.max(1, sh * rect[3]));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     if (q) gl.endQuery(this.timer.ext.TIME_ELAPSED_EXT);
   }

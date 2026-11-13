@@ -1,0 +1,99 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Owl test player</title>
+<!--
+  A YouTube-style watch page for testing Midnight Owl without YouTube (which shows automated browsers a bot check).
+  Same structure that matters to the extension: a <video> inside nested player containers, a custom control bar
+  instead of native controls, a search box, theater mode that resizes the player, and in-page navigation that
+  changes the URL without reloading.
+
+  Use it by hand: cd test/pages && python3 -m http.server 8770, open http://localhost:8770/player.html and either
+  pick any video file on your computer or pass ?src=<url> (default demo.mp4). Press O to darken.
+  test/run.js uses it too.
+-->
+<style>
+  :root { color-scheme: light; --bg: #fff; --fg: #0f0f0f; --muted: #606060; --chip: #f2f2f2; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 16px; height: 56px; padding: 0 16px; background: var(--bg); }
+  header b { font-size: 18px; }
+  #search { flex: 0 1 520px; margin: 0 auto; height: 36px; padding: 0 14px; border: 1px solid #ccc; border-radius: 18px; font: inherit; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 24px; max-width: 1700px; margin: 0 auto; padding: 0 24px 24px; }
+  body.theater main { grid-template-columns: 1fr; }
+  #player { position: relative; background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 16 / 9; }
+  body.theater #player { border-radius: 0; height: min(75vh, 56.25vw); aspect-ratio: auto; margin: 0 -24px; }
+  .html5-video-container { position: absolute; inset: 0; }
+  video { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .bar { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; display: flex; gap: 6px; align-items: center; padding: 8px 12px;
+         background: linear-gradient(transparent, rgba(0, 0, 0, .7)); color: #fff; }
+  .bar button { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; padding: 4px 8px; border-radius: 4px; }
+  .bar button:hover, .bar button[aria-pressed=true] { background: rgba(255, 255, 255, .2); }
+  .bar input[type=range] { flex: 1; }
+  h1 { font-size: 20px; margin: 12px 0 4px; }
+  .meta { color: var(--muted); margin: 0 0 12px; }
+  .side a { display: block; padding: 8px; margin-bottom: 8px; border-radius: 8px; background: var(--chip); color: inherit; text-decoration: none; }
+  label.pick { display: inline-block; margin: 8px 0; padding: 6px 12px; border-radius: 18px; background: var(--chip); cursor: pointer; }
+  label.pick input { display: none; }
+</style>
+<header>
+  <b>OwlTube</b>
+  <input id="search" type="search" placeholder="Search (typing O here must not toggle)" aria-label="Search">
+</header>
+<main>
+  <section>
+    <div id="player">
+      <div class="html5-video-container"><video id="v" class="html5-main-video" muted autoplay loop playsinline></video></div>
+      <div class="bar">
+        <button id="play" type="button">Pause</button>
+        <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Seek">
+        <span id="time">0:00</span>
+        <button type="button" data-rate="1">1×</button>
+        <button type="button" data-rate="2">2×</button>
+        <button type="button" data-rate="2.5" aria-pressed="true">2.5×</button>
+        <button id="theater" type="button" title="Theater mode (t)">Theater</button>
+      </div>
+    </div>
+    <h1 id="title">Lecture</h1>
+    <p class="meta">Test player · <label class="pick">Open a video file<input id="file" type="file" accept="video/*"></label></p>
+  </section>
+  <aside class="side">
+    <a href="?lecture=2" data-nav>Next lecture (in-page navigation)</a>
+    <a href="?lecture=3" data-nav>Another lecture</a>
+  </aside>
+</main>
+<script>
+  const v = document.getElementById('v'), q = new URLSearchParams(location.search);
+  v.src = q.get('src') || 'demo.mp4';
+  v.playbackRate = 2.5;
+  v.addEventListener('loadedmetadata', () => { v.playbackRate = +document.querySelector('[data-rate][aria-pressed=true]').dataset.rate; });
+  document.getElementById('file').addEventListener('change', e => {
+    const f = e.target.files[0]; if (!f) return;
+    v.src = URL.createObjectURL(f); document.getElementById('title').textContent = f.name;
+  });
+  document.getElementById('play').onclick = () => v.paused ? v.play() : v.pause();
+  v.addEventListener('play', () => play.textContent = 'Pause'); v.addEventListener('pause', () => play.textContent = 'Play');
+  const seekBar = document.getElementById('seek'), time = document.getElementById('time');
+  v.addEventListener('timeupdate', () => {
+    if (v.duration) seekBar.value = Math.round(1000 * v.currentTime / v.duration);
+    time.textContent = `${Math.floor(v.currentTime / 60)}:${String(Math.floor(v.currentTime % 60)).padStart(2, '0')}`;
+  });
+  seekBar.oninput = () => { if (v.duration) v.currentTime = seekBar.value / 1000 * v.duration; };
+  for (const b of document.querySelectorAll('[data-rate]')) b.onclick = () => {
+    v.playbackRate = +b.dataset.rate;
+    for (const o of document.querySelectorAll('[data-rate]')) o.setAttribute('aria-pressed', o === b);
+  };
+  const theater = () => document.body.classList.toggle('theater');
+  document.getElementById('theater').onclick = theater;
+  // Page shortcuts, like YouTube's: t theater, k play/pause; never while typing.
+  addEventListener('keydown', e => {
+    if (e.target.closest('input, textarea') || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === 't') theater();
+    if (e.key === 'k') v.paused ? v.play() : v.pause();
+  });
+  // In-page navigation: the URL changes, the page does not reload, the same <video> keeps playing.
+  for (const a of document.querySelectorAll('[data-nav]')) a.onclick = e => {
+    e.preventDefault(); history.pushState({}, '', a.href);
+    document.getElementById('title').textContent = a.textContent;
+  };
+</script>

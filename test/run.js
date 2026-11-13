@@ -171,7 +171,23 @@ const seek = (page, t) => page.evaluate(async t => {
   const p10 = await ctx.newPage(); await p10.goto('http://localhost:8770/shadow.html'); await p10.waitForTimeout(1500);
   const sh = await p10.evaluate(() => { const c = document.querySelector('my-player').shadowRoot.querySelector('.owl-canvas'); return !!c && getComputedStyle(c).display !== 'none'; });
   check('video inside shadow DOM is darkened too', sh);
-  for (const pg of [p7, p8, p9, p10]) await pg.close();
+  // YouTube-style watch page: custom control bar, theater mode, search box, in-page navigation.
+  const p12 = await ctx.newPage(); await p12.goto('http://localhost:8770/player.html');
+  await p12.waitForFunction(() => document.querySelector('video').readyState >= 2); await seek(p12, 2.5);
+  const fitted = () => p12.evaluate(() => {   // the canvas must cover exactly the picture (object-fit: contain)
+    const v = document.querySelector('video'), c = v.nextElementSibling, a = v.getBoundingClientRect(), b = c.getBoundingClientRect();
+    const s = Math.min(a.width / v.videoWidth, a.height / v.videoHeight), w = v.videoWidth * s, h = v.videoHeight * s;
+    return Math.max(Math.abs(b.width - w), Math.abs(b.height - h), Math.abs(b.left - (a.left + (a.width - w) / 2)), Math.abs(b.top - (a.top + (a.height - h) / 2)));
+  });
+  check('YouTube-style player: darkened by WebGL over the picture', (await pathOf(p12)) === 'webgl' && (await fitted()) <= 1);
+  await p12.mouse.click(5, 300); await p12.keyboard.press('t'); await p12.waitForTimeout(500);
+  const th = await fitted();
+  check('...theater mode (letterboxed): overlay follows the new size', (await p12.evaluate(() => document.body.classList.contains('theater'))) && th <= 1, `off by ${th.toFixed(1)} px`);
+  await p12.click('#search'); await p12.keyboard.type('owl notes'); await p12.waitForTimeout(200);
+  check('...typing o in its search box does not toggle', (await pathOf(p12)) === 'webgl');
+  const pl = await luma(p12);
+  check('...whiteboard goes dark there too', pl < 0.15, `mean luma ${pl.toFixed(2)}`);
+  for (const pg of [p7, p8, p9, p10, p12]) await pg.close();
 
   await page.bringToFront(); await seek(page, 2.5);
   await page.evaluate(() => dispatchEvent(new KeyboardEvent('keydown', { key: 'o', code: 'KeyO', bubbles: true })));
