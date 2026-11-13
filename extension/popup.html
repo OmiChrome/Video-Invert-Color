@@ -22,6 +22,15 @@
   .switch:checked { background: var(--accent); }
   .switch:checked::after { left: 21px; }
   footer { color: var(--muted); font-size: 12px; }
+  /* Firefox for Android opens the popup as a full page: bigger, touch-friendly controls. */
+  @media (pointer: coarse) {
+    body { width: auto; max-width: 440px; margin: 0 auto; padding: 24px 20px; font-size: 17px; gap: 20px; }
+    header img { width: 56px; height: 56px; } header b { font-size: 20px; }
+    fieldset label { padding: 12px 0; }
+    .switch { width: 56px; height: 30px; border-radius: 15px; } .switch::after { width: 24px; height: 24px; } .switch:checked::after { left: 29px; }
+    input[type=checkbox]:not(.switch) { width: 22px; height: 22px; }
+    footer { display: none; }
+  }
   kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 </style>
 <header>

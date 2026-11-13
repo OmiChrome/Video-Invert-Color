@@ -13,7 +13,7 @@ Everything you need is in two folders:
 
 1. Go to **https://addons.mozilla.org/developers/** → **Log in** (make a free Mozilla account).
 2. Click **Submit a New Add-on** → choose **On this site** → **Continue**.
-3. Upload **`release/midnight-owl-firefox-1.0.0.zip`**. Tick **Firefox** (desktop) → **Continue**.
+3. Upload **`release/midnight-owl-firefox-1.0.0.zip`**. Tick **both** boxes: **Firefox** and **Firefox for Android** → **Continue**.
 4. "Do you need to submit source code?" → **No** → **Continue**.
 5. Fill in from `store/LISTING.md`:
    - Name, Summary, Description

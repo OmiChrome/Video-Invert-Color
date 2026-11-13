@@ -15,6 +15,7 @@ Midnight Owl makes lecture videos comfortable to watch at night, in a dark room.
 • Blackboards and dark slides stay dark, so you never get a white flash, even at 2.5× speed.
 
 How to use: press O on any page with a video (Alt+O works too). The owl icon lights up while it is working and turns grey when it is not.
+On Android (Firefox): open the menu → Extensions → Midnight Owl, and flip the switch.
 
 Three modes: Smart (default), Invert and Dim. Also a warm tint for less blue light and a text brightness slider.
 

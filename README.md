@@ -10,6 +10,7 @@ Bright boards turn dark. Faces, photos and colours stay natural.
 [![Firefox Add-ons](https://img.shields.io/badge/Firefox_Add--ons-coming_soon-FF7139?style=for-the-badge&logo=firefoxbrowser&logoColor=white)](#install)
 [![Edge Add-ons](https://img.shields.io/badge/Edge_Add--ons-coming_soon-0078D7?style=for-the-badge&logo=microsoftedge&logoColor=white)](#install)
 
+![Android](https://img.shields.io/badge/Android-Firefox-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/license-MIT-555?style=flat-square)
 ![Manifest V3](https://img.shields.io/badge/Manifest-V3-555?style=flat-square)
 ![Size](https://img.shields.io/badge/size-~40_KB-555?style=flat-square)
@@ -26,6 +27,8 @@ Bright boards turn dark. Faces, photos and colours stay natural.
 |---|---|
 | <kbd>O</kbd> | On / off, on any page with a video |
 | <kbd>Alt</kbd> + <kbd>O</kbd> | Backup shortcut (change it in `chrome://extensions/shortcuts`) |
+
+On **Android**, use Firefox: menu → **Extensions** → **Midnight Owl** → switch on.
 
 The toolbar owl **lights up** when it is darkening a video and goes **grey** when it isn't.
 

@@ -6,8 +6,9 @@ const activeFrames = new Map(); // tabId -> Set of frameIds darkening a video
 
 function paint(tabId) {
   const on = (activeFrames.get(tabId)?.size ?? 0) > 0;
-  api.action.setIcon({ tabId, path: icons(on ? 'on' : 'off') }).catch(() => {});
-  api.action.setTitle({ tabId, title: on ? 'Midnight Owl is darkening this video (O or Alt+O)' : 'Midnight Owl (O or Alt+O)' }).catch(() => {});
+  // Firefox for Android has no toolbar icon to recolour, so each call is optional.
+  api.action.setIcon?.({ tabId, path: icons(on ? 'on' : 'off') })?.catch(() => {});
+  api.action.setTitle?.({ tabId, title: on ? 'Midnight Owl is darkening this video (O or Alt+O)' : 'Midnight Owl (O or Alt+O)' })?.catch(() => {});
 }
 
 api.runtime.onMessage.addListener((msg, sender) => {
@@ -24,7 +25,8 @@ api.tabs.onUpdated.addListener((tabId, info) => {
 });
 api.tabs.onRemoved.addListener(tabId => activeFrames.delete(tabId));
 
-api.commands.onCommand.addListener(async cmd => {
+// Keyboard shortcuts don't exist on Firefox for Android; there the popup is the switch.
+api.commands?.onCommand.addListener(async cmd => {
   if (cmd !== 'toggle') return;
   const { on = false } = await api.storage.local.get('on');
   api.storage.local.set({ on: !on });
